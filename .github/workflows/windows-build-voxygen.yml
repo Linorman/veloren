@@ -13,7 +13,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
+        
+      - name: Install ninja
+        run: |
+          choco install ninja
+          refreshenv  # 刷新环境变量
+          
       - name: Build project
         run: cargo build --release --bin veloren-voxygen
 
