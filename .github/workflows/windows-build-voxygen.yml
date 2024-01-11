@@ -13,13 +13,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Set up Rust with GNU toolchain
-        uses: actions/setup-rust@v1
-        with:
-          rust-version: stable
-          toolchain: stable-x86_64-pc-windows-gnu  # 使用 GNU 工具链
-
+        
+      - name: Install ninja
+        run: |
+          choco install ninja -y
+          echo "##vso[task.prependpath]C:\\ProgramData\\chocolatey\\lib\\ninja\\tools"
+          
       - name: Build project
         run: cargo build --release --bin veloren-voxygen
 
