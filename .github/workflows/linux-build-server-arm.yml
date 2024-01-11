@@ -1,29 +1,30 @@
-name: linux-server-arm build
+name: linux-arm64 build
 
 on:
   workflow_dispatch:  # 手动触发
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [ arm64 ]
+    runs-on: ubuntu-latest  # 使用 Ubuntu 运行环境
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install ninja
+      - name: Set up QEMU
         run: |
-          sudo apt-get update
-          sudo apt-get install ninja-build -y
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          docker buildx create --use
 
-      - name: Build project
-        run: cargo build --release --package veloren-server-cli --bin veloren-server-cli
+      - name: Install cross
+        run: |
+          cargo install cross
+
+      - name: Build project for ARM64
+        run: cross build --release --target aarch64-unknown-linux-gnu --bin veloren-server-cli
 
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
-          name: veloren-server-cli
-          path: target/release/veloren-server-cli
+          name: veloren-server-cli-arm64
+          path: target/aarch64-unknown-linux-gnu/release/veloren-server-cli
