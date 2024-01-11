@@ -1,0 +1,29 @@
+name: linux-server-arm build
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ arm64 ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install ninja-build -y
+
+      - name: Build project
+        run: cargo build --release --package veloren-server-cli --bin veloren-server-cli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: veloren-server-cli
+          path: target/release/veloren-server-cli
