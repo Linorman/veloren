@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # 使用 Windows 运行环境
+    runs-on: ubuntu-latest  # 使用 Ubuntu 运行环境
 
     steps:
       - name: Checkout repository
@@ -16,8 +16,8 @@ jobs:
 
       - name: Install ninja
         run: |
-          choco install ninja -y
-          echo "##vso[task.prependpath]C:\\ProgramData\\chocolatey\\lib\\ninja\\tools"
+          sudo apt-get update
+          sudo apt-get install ninja-build -y
 
       - name: Build project
         run: cargo build --release --package veloren-server-cli --bin veloren-server-cli
