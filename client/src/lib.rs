@@ -56,6 +56,7 @@ use common_base::{prof_span, span};
 use common_net::{
     msg::{
         self,
+        server::ServerDescription,
         world_msg::{EconomyInfo, PoiInfo, SiteId, SiteInfo},
         ChatTypeContext, ClientGeneral, ClientMsg, ClientRegister, ClientType, DisconnectReason,
         InviteAnswer, Notification, PingMsg, PlayerInfo, PlayerListUpdate, RegisterError,
@@ -228,6 +229,8 @@ pub struct Client {
     presence: Option<PresenceKind>,
     runtime: Arc<Runtime>,
     server_info: ServerInfo,
+    /// Localized server motd and rules
+    server_description: ServerDescription,
     world_data: WorldData,
     weather: WeatherLerp,
     player_list: HashMap<Uid, PlayerInfo>,
@@ -242,6 +245,7 @@ pub struct Client {
     available_recipes: HashMap<String, Option<SpriteKind>>,
     lod_zones: HashMap<Vec2<i32>, lod::Zone>,
     lod_last_requested: Option<Instant>,
+    lod_pos_fallback: Option<Vec2<f32>>,
     force_update_counter: u64,
 
     max_group_size: u32,
@@ -305,8 +309,10 @@ impl Client {
         mismatched_server_info: &mut Option<ServerInfo>,
         username: &str,
         password: &str,
+        locale: Option<String>,
         auth_trusted: impl FnMut(&str) -> bool,
         init_stage_update: &(dyn Fn(ClientInitStage) + Send + Sync),
+        add_foreign_systems: impl Fn(&mut DispatcherBuilder) + Send + 'static,
     ) -> Result<Self, Error> {
         let network = Network::new(Pid::new(), &runtime);
 
@@ -364,6 +370,7 @@ impl Client {
         Self::register(
             username,
             password,
+            locale,
             auth_trusted,
             &server_info,
             &mut register_stream,
@@ -385,6 +392,7 @@ impl Client {
             ability_map,
             server_constants,
             repair_recipe_book,
+            description,
         } = loop {
             tokio::select! {
                 // Spawn in a blocking thread (leaving the network thread free).  This is mostly
@@ -409,7 +417,16 @@ impl Client {
 
             // Initialize `State`
             let pools = State::pools(GameMode::Client);
-            let mut state = State::client(pools, map_size_lg, world_map.default_chunk);
+            let mut state = State::client(
+                pools,
+                map_size_lg,
+                world_map.default_chunk,
+                // TODO: Add frontend systems
+                |dispatch_builder| {
+                    add_local_systems(dispatch_builder);
+                    add_foreign_systems(dispatch_builder);
+                },
+            );
             // Client-only components
             state.ecs_mut().register::<comp::Last<CharacterState>>();
             let entity = state.ecs_mut().apply_entity_package(entity_package);
@@ -715,6 +732,7 @@ impl Client {
             presence: None,
             runtime,
             server_info,
+            server_description: description,
             world_data: WorldData {
                 lod_base,
                 lod_alt,
@@ -743,6 +761,7 @@ impl Client {
 
             lod_zones: HashMap::new(),
             lod_last_requested: None,
+            lod_pos_fallback: None,
 
             force_update_counter: 0,
 
@@ -791,6 +810,7 @@ impl Client {
     async fn register(
         username: &str,
         password: &str,
+        locale: Option<String>,
         mut auth_trusted: impl FnMut(&str) -> bool,
         server_info: &ServerInfo,
         register_stream: &mut Stream,
@@ -828,7 +848,10 @@ impl Client {
 
         debug!("Registering client...");
 
-        register_stream.send(ClientRegister { token_or_username })?;
+        register_stream.send(ClientRegister {
+            token_or_username,
+            locale,
+        })?;
 
         match register_stream.recv::<ServerRegisterAnswer>().await? {
             Err(RegisterError::AuthError(err)) => Err(Error::AuthErr(err)),
@@ -880,7 +903,7 @@ impl Client {
                     | ClientGeneral::DeleteCharacter(_)
                     | ClientGeneral::Character(_, _)
                     | ClientGeneral::Spectate(_) => &mut self.character_screen_stream,
-                    //Only in game
+                    // Only in game
                     ClientGeneral::ControllerInputs(_)
                     | ClientGeneral::ControlEvent(_)
                     | ClientGeneral::ControlAction(_)
@@ -901,7 +924,7 @@ impl Client {
                         }
                         &mut self.in_game_stream
                     },
-                    //Only in game, terrain
+                    // Terrain
                     ClientGeneral::TerrainChunkRequest { .. }
                     | ClientGeneral::LodZoneRequest { .. } => {
                         #[cfg(feature = "tracy")]
@@ -910,7 +933,7 @@ impl Client {
                         }
                         &mut self.terrain_stream
                     },
-                    //Always possible
+                    // Always possible
                     ClientGeneral::ChatMsg(_)
                     | ClientGeneral::Command(_, _)
                     | ClientGeneral::Terminate => &mut self.general_stream,
@@ -1172,6 +1195,8 @@ impl Client {
 
     pub fn server_info(&self) -> &ServerInfo { &self.server_info }
 
+    pub fn server_description(&self) -> &ServerDescription { &self.server_description }
+
     pub fn world_data(&self) -> &WorldData { &self.world_data }
 
     pub fn recipe_book(&self) -> &RecipeBook { &self.recipe_book }
@@ -1185,6 +1210,10 @@ impl Client {
     }
 
     pub fn lod_zones(&self) -> &HashMap<Vec2<i32>, lod::Zone> { &self.lod_zones }
+
+    /// Set the fallback position used for loading LoD zones when the client
+    /// entity does not have a position.
+    pub fn set_lod_pos_fallback(&mut self, pos: Vec2<f32>) { self.lod_pos_fallback = Some(pos); }
 
     /// Returns whether the specified recipe can be crafted and the sprite, if
     /// any, that is required to do so.
@@ -1796,12 +1825,7 @@ impl Client {
 
     /// Execute a single client tick, handle input and update the game state by
     /// the given duration.
-    pub fn tick(
-        &mut self,
-        inputs: ControllerInputs,
-        dt: Duration,
-        add_foreign_systems: impl Fn(&mut DispatcherBuilder),
-    ) -> Result<Vec<Event>, Error> {
+    pub fn tick(&mut self, inputs: ControllerInputs, dt: Duration) -> Result<Vec<Event>, Error> {
         span!(_guard, "tick", "Client::tick");
         // This tick function is the centre of the Veloren universe. Most client-side
         // things are managed from here, and as such it's important that it
@@ -1902,10 +1926,6 @@ impl Client {
         // 4) Tick the client's LocalState
         self.state.tick(
             Duration::from_secs_f64(dt.as_secs_f64() * self.dt_adjustment),
-            |dispatch_builder| {
-                add_local_systems(dispatch_builder);
-                add_foreign_systems(dispatch_builder);
-            },
             true,
             None,
             &self.connected_server_constants,
@@ -2087,9 +2107,11 @@ impl Client {
             let now = Instant::now();
             self.pending_chunks
                 .retain(|_, created| now.duration_since(*created) < Duration::from_secs(3));
+        }
 
+        if let Some(lod_pos) = pos.map(|p| p.0.xy()).or(self.lod_pos_fallback) {
             // Manage LoD zones
-            let lod_zone = pos.0.xy().map(|e| lod::from_wpos(e as i32));
+            let lod_zone = lod_pos.map(|e| lod::from_wpos(e as i32));
 
             // Request LoD zones that are in range
             if self
@@ -3009,8 +3031,10 @@ mod tests {
             &mut None,
             username,
             password,
+            None,
             |suggestion: &str| suggestion == auth_server,
             &|_| {},
+            |_| {},
         ));
         let localisation = LocalizationHandle::load_expect("en");
 
@@ -3020,7 +3044,7 @@ mod tests {
 
             //tick
             let events_result: Result<Vec<Event>, Error> =
-                client.tick(ControllerInputs::default(), clock.dt(), |_| {});
+                client.tick(ControllerInputs::default(), clock.dt());
 
             //chat functionality
             client.send_chat("foobar".to_string());

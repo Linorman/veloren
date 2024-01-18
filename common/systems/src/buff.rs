@@ -22,8 +22,8 @@ use common_base::prof_span;
 use common_ecs::{Job, Origin, ParMode, Phase, System};
 use rayon::iter::ParallelIterator;
 use specs::{
-    shred::ResourceId, Entities, Entity, LendJoin, ParJoin, Read, ReadExpect, ReadStorage,
-    SystemData, World, WriteStorage,
+    shred, Entities, Entity, LendJoin, ParJoin, Read, ReadExpect, ReadStorage, SystemData,
+    WriteStorage,
 };
 
 #[derive(SystemData)]
@@ -161,7 +161,7 @@ impl<'a> System<'a> for Sys {
                         entity,
                         buff_change: BuffChange::Add(Buff::new(
                             BuffKind::Bleeding,
-                            BuffData::new(1.0, Some(Secs(6.0))).with_force_immediate(true),
+                            BuffData::new(1.0, Some(Secs(6.0))),
                             Vec::new(),
                             BuffSource::World,
                             *read_data.time,
@@ -179,7 +179,7 @@ impl<'a> System<'a> for Sys {
                         entity,
                         buff_change: BuffChange::Add(Buff::new(
                             BuffKind::Bleeding,
-                            BuffData::new(5.0, Some(Secs(3.0))).with_force_immediate(true),
+                            BuffData::new(5.0, Some(Secs(3.0))),
                             Vec::new(),
                             BuffSource::World,
                             *read_data.time,
@@ -215,7 +215,7 @@ impl<'a> System<'a> for Sys {
                         entity,
                         buff_change: BuffChange::Add(Buff::new(
                             BuffKind::Bleeding,
-                            BuffData::new(15.0, Some(Secs(0.1))).with_force_immediate(true),
+                            BuffData::new(15.0, Some(Secs(0.1))),
                             Vec::new(),
                             BuffSource::World,
                             *read_data.time,
@@ -420,7 +420,6 @@ impl<'a> System<'a> for Sys {
                             execute_effect(
                                 effect,
                                 buff.kind,
-                                &buff.data,
                                 buff.start_time,
                                 kind_start_time,
                                 &read_data,
@@ -478,7 +477,6 @@ impl<'a> System<'a> for Sys {
 fn execute_effect(
     effect: &BuffEffect,
     buff_kind: BuffKind,
-    buff_data: &BuffData,
     buff_start_time: Time,
     buff_kind_start_time: Time,
     read_data: &ReadData,
@@ -516,9 +514,7 @@ fn execute_effect(
         let prev_tick = ((time_passed - dt).max(0.0) / tick_dur.0).floor();
         let whole_ticks = curr_tick - prev_tick;
 
-        if buff_data.force_immediate {
-            Some((1.0 / tick_dur.0 * dt) as f32)
-        } else if buff_will_expire {
+        if buff_will_expire {
             // If the buff is ending, include the fraction of progress towards the next
             // tick.
             let fractional_tick = (time_passed % tick_dur.0) / tick_dur.0;
@@ -663,6 +659,9 @@ fn execute_effect(
         },
         BuffEffect::HealReduction(red) => {
             stat.heal_multiplier *= 1.0 - *red;
+        },
+        BuffEffect::MoveSpeedReduction(red) => {
+            stat.move_speed_multiplier *= 1.0 - *red;
         },
         BuffEffect::PoiseDamageFromLostHealth {
             initial_health,

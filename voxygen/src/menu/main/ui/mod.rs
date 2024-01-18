@@ -92,6 +92,7 @@ const BG_IMGS: [&str; 14] = [
 pub enum WorldChange {
     Name(String),
     Seed(u32),
+    DayLength(f64),
     SizeX(u32),
     SizeY(u32),
     Scale(f64),
@@ -108,6 +109,7 @@ impl WorldChange {
         match self {
             WorldChange::Name(name) => world.name = name,
             WorldChange::Seed(seed) => world.seed = seed,
+            WorldChange::DayLength(d) => world.day_length = d,
             WorldChange::SizeX(s) => gen_opts.x_lg = s,
             WorldChange::SizeY(s) => gen_opts.y_lg = s,
             WorldChange::Scale(scale) => gen_opts.scale = scale,
@@ -205,7 +207,7 @@ impl Showing {
     }
 }
 
-struct Controls {
+pub struct Controls {
     fonts: Fonts,
     imgs: Imgs,
     bg_img: widget::image::Handle,
@@ -675,6 +677,7 @@ pub struct MainMenuUi {
     // TODO: re add this
     // tip_no: u16,
     controls: Controls,
+    bg_img_spec: &'static str,
 }
 
 impl MainMenuUi {
@@ -693,7 +696,7 @@ impl MainMenuUi {
 
         let fonts = Fonts::load(i18n.fonts(), &mut ui).expect("Impossible to load fonts");
 
-        let bg_img_spec = BG_IMGS.choose(&mut thread_rng()).unwrap();
+        let bg_img_spec = rand_bg_image_spec();
 
         let bg_img = assets::Image::load_expect(bg_img_spec).read().to_image();
         let controls = Controls::new(
@@ -705,8 +708,14 @@ impl MainMenuUi {
             server,
         );
 
-        Self { ui, controls }
+        Self {
+            ui,
+            controls,
+            bg_img_spec,
+        }
     }
+
+    pub fn bg_img_spec(&self) -> &'static str { self.bg_img_spec }
 
     pub fn update_language(&mut self, i18n: LocalizationHandle, settings: &Settings) {
         self.controls.i18n = i18n;
@@ -805,3 +814,5 @@ impl MainMenuUi {
 
     pub fn render<'a>(&'a self, drawer: &mut UiDrawer<'_, 'a>) { self.ui.render(drawer); }
 }
+
+pub fn rand_bg_image_spec() -> &'static str { BG_IMGS.choose(&mut thread_rng()).unwrap() }

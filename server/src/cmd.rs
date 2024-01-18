@@ -6,7 +6,8 @@ use crate::{
     location::Locations,
     login_provider::LoginProvider,
     settings::{
-        Ban, BanAction, BanInfo, EditableSetting, SettingError, WhitelistInfo, WhitelistRecord,
+        server_description::ServerDescription, Ban, BanAction, BanInfo, EditableSetting,
+        SettingError, WhitelistInfo, WhitelistRecord,
     },
     sys::terrain::NpcData,
     weather::WeatherSim,
@@ -21,15 +22,14 @@ use common::{
     assets,
     calendar::Calendar,
     cmd::{
-        AreaKind, EntityTarget, KitSpec, ServerChatCommand, BUFF_PACK, BUFF_PARSER, ITEM_SPECS,
+        AreaKind, EntityTarget, KitSpec, ServerChatCommand, BUFF_PACK, BUFF_PARSER,
         KIT_MANIFEST_PATH, PRESET_MANIFEST_PATH,
     },
     comp::{
         self,
-        aura::{Aura, AuraKind, AuraTarget},
-        buff::{Buff, BuffCategory, BuffData, BuffKind, BuffSource},
+        buff::{Buff, BuffData, BuffKind, BuffSource, MiscBuffData},
         inventory::{
-            item::{tool::AbilityMap, MaterialStatManifest, Quality},
+            item::{all_items_expect, tool::AbilityMap, MaterialStatManifest, Quality},
             slot::Slot,
         },
         invite::InviteKind,
@@ -778,11 +778,23 @@ fn handle_motd(
     _args: Vec<String>,
     _action: &ServerChatCommand,
 ) -> CmdResult<()> {
+    let locale = server
+        .state
+        .ecs()
+        .read_storage::<Client>()
+        .get(client)
+        .and_then(|client| client.locale.clone());
+
     server.notify_client(
         client,
         ServerGeneral::server_msg(
             ChatType::CommandInfo,
-            (*server.editable_settings().server_description).clone(),
+            server
+                .editable_settings()
+                .server_description
+                .get(locale.as_deref())
+                .map_or("", |d| &d.motd)
+                .to_string(),
         ),
     );
     Ok(())
@@ -793,22 +805,31 @@ fn handle_set_motd(
     client: EcsEntity,
     _target: EcsEntity,
     args: Vec<String>,
-    _action: &ServerChatCommand,
+    action: &ServerChatCommand,
 ) -> CmdResult<()> {
     let data_dir = server.data_dir();
     let client_uuid = uuid(server, client, "client")?;
     // Ensure the person setting this has a real role in the settings file, since
     // it's persistent.
     let _client_real_role = real_role(server, client_uuid, "client")?;
-    match parse_cmd_args!(args, String) {
-        Some(msg) => {
+    match parse_cmd_args!(args, String, String) {
+        (Some(locale), Some(msg)) => {
             let edit =
                 server
                     .editable_settings_mut()
                     .server_description
                     .edit(data_dir.as_ref(), |d| {
-                        let info = format!("Server description set to {:?}", msg);
-                        **d = msg;
+                        let info = format!("Server message of the day set to {:?}", msg);
+
+                        if let Some(description) = d.descriptions.get_mut(&locale) {
+                            description.motd = msg;
+                        } else {
+                            d.descriptions.insert(locale, ServerDescription {
+                                motd: msg,
+                                rules: None,
+                            });
+                        }
+
                         Some(info)
                     });
             drop(data_dir);
@@ -816,20 +837,25 @@ fn handle_set_motd(
                 unreachable!("edit always returns Some")
             })
         },
-        None => {
+        (Some(locale), None) => {
             let edit =
                 server
                     .editable_settings_mut()
                     .server_description
                     .edit(data_dir.as_ref(), |d| {
-                        d.clear();
-                        Some("Removed server description".to_string())
+                        if let Some(description) = d.descriptions.get_mut(&locale) {
+                            description.motd.clear();
+                            Some("Removed server message of the day".to_string())
+                        } else {
+                            Some("This locale had no motd set".to_string())
+                        }
                     });
             drop(data_dir);
             edit_setting_feedback(server, client, edit, || {
                 unreachable!("edit always returns Some")
             })
         },
+        _ => Err(Content::Plain(action.help_string())),
     }
 }
 
@@ -1973,44 +1999,11 @@ fn handle_spawn_campfire(
     _action: &ServerChatCommand,
 ) -> CmdResult<()> {
     let pos = position(server, target, "target")?;
-    let time = server.state.get_time();
     server
         .state
-        .create_object(pos, comp::object::Body::CampfireLit)
-        .with(LightEmitter {
-            col: Rgb::new(1.0, 0.65, 0.2),
-            strength: 2.0,
-            flicker: 1.0,
-            animated: true,
-        })
-        .with(WaypointArea::default())
-        .with(comp::Auras::new(vec![
-            Aura::new(
-                AuraKind::Buff {
-                    kind: BuffKind::CampfireHeal,
-                    data: BuffData::new(0.02, Some(Secs(1.0))),
-                    category: BuffCategory::Natural,
-                    source: BuffSource::World,
-                },
-                5.0,
-                None,
-                AuraTarget::All,
-                Time(time),
-            ),
-            Aura::new(
-                AuraKind::Buff {
-                    kind: BuffKind::Burning,
-                    data: BuffData::new(2.0, Some(Secs(10.0))),
-                    category: BuffCategory::Natural,
-                    source: BuffSource::World,
-                },
-                0.7,
-                None,
-                AuraTarget::All,
-                Time(time),
-            ),
-        ]))
-        .build();
+        .ecs()
+        .read_resource::<EventBus<ServerEvent>>()
+        .emit_now(ServerEvent::CreateWaypoint(pos.0));
 
     server.notify_client(
         client,
@@ -2500,6 +2493,15 @@ fn handle_kill_npcs(
     Ok(())
 }
 
+enum KitEntry {
+    Spec(KitSpec),
+    Item(Item),
+}
+
+impl From<KitSpec> for KitEntry {
+    fn from(spec: KitSpec) -> Self { Self::Spec(spec) }
+}
+
 fn handle_kit(
     server: &mut Server,
     client: EcsEntity,
@@ -2519,13 +2521,13 @@ fn handle_kit(
 
     match name.as_str() {
         "all" => {
-            // TODO: we will probably want to handle modular items here too
-            let items = &ITEM_SPECS;
+            // This can't fail, we have tests
+            let items = all_items_expect();
+            let total = items.len();
+
             let res = push_kit(
-                items
-                    .iter()
-                    .map(|item_id| (KitSpec::Item(item_id.to_string()), 1)),
-                items.len(),
+                items.into_iter().map(|item| (KitEntry::Item(item), 1)),
+                total,
                 server,
                 target,
             );
@@ -2546,7 +2548,7 @@ fn handle_kit(
 
             let res = push_kit(
                 kit.iter()
-                    .map(|(item_id, quantity)| (item_id.clone(), *quantity)),
+                    .map(|(item_id, quantity)| (item_id.clone().into(), *quantity)),
                 kit.len(),
                 server,
                 target,
@@ -2561,7 +2563,7 @@ fn handle_kit(
 
 fn push_kit<I>(kit: I, count: usize, server: &mut Server, target: EcsEntity) -> CmdResult<()>
 where
-    I: Iterator<Item = (KitSpec, u32)>,
+    I: Iterator<Item = (KitEntry, u32)>,
 {
     if let (Some(mut target_inventory), mut target_inv_update) = (
         server
@@ -2595,19 +2597,20 @@ where
 }
 
 fn push_item(
-    item_id: KitSpec,
+    item_id: KitEntry,
     quantity: u32,
     server: &Server,
     push: &mut dyn FnMut(Item) -> Result<(), Item>,
 ) -> CmdResult<()> {
-    let items = match &item_id {
-        KitSpec::Item(item_id) => vec![
-            Item::new_from_asset(item_id).map_err(|_| format!("Unknown item: {:#?}", item_id))?,
+    let items = match item_id {
+        KitEntry::Spec(KitSpec::Item(item_id)) => vec![
+            Item::new_from_asset(&item_id).map_err(|_| format!("Unknown item: {:#?}", item_id))?,
         ],
-        KitSpec::ModularWeapon { tool, material } => {
-            comp::item::modular::generate_weapons(*tool, *material, None)
+        KitEntry::Spec(KitSpec::ModularWeapon { tool, material }) => {
+            comp::item::modular::generate_weapons(tool, material, None)
                 .map_err(|err| format!("{:#?}", err))?
         },
+        KitEntry::Item(item) => vec![item],
     };
 
     let mut res = Ok(());
@@ -4206,49 +4209,128 @@ fn handle_buff(
     args: Vec<String>,
     action: &ServerChatCommand,
 ) -> CmdResult<()> {
-    if let (Some(buff), strength, duration) = parse_cmd_args!(args, String, f32, f64) {
-        let strength = strength.unwrap_or(0.01);
-        let duration = duration.unwrap_or(1.0);
+    let (Some(buff), strength, duration, misc_data_spec) =
+        parse_cmd_args!(args, String, f32, f64, String)
+    else {
+        return Err(Content::Plain(action.help_string()));
+    };
+
+    let strength = strength.unwrap_or(0.01);
+
+    if buff == "all" {
+        let duration = duration.unwrap_or(5.0);
         let buffdata = BuffData::new(strength, Some(Secs(duration)));
-        if buff != "all" {
-            cast_buff(&buff, buffdata, server, target)
-        } else {
-            for kind in BUFF_PACK.iter() {
-                cast_buff(kind, buffdata, server, target)?;
-            }
-            Ok(())
-        }
+
+        // apply every(*) non-complex buff
+        //
+        // (*) BUFF_PACK contains all buffs except
+        // invulnerability
+        BUFF_PACK
+            .iter()
+            .filter_map(|kind_key| parse_buffkind(kind_key))
+            .filter(|buffkind| buffkind.is_simple())
+            .for_each(|buffkind| cast_buff(buffkind, buffdata, server, target));
+        Ok(())
     } else {
-        Err(Content::Plain(action.help_string()))
+        let buffkind = parse_buffkind(&buff).ok_or_else(|| {
+            Content::localized_with_args("command-buff-unknown", [("buff", buff.clone())])
+        })?;
+
+        if buffkind.is_simple() {
+            let duration = duration.unwrap_or(10.0);
+            let buffdata = BuffData::new(strength, Some(Secs(duration)));
+            cast_buff(buffkind, buffdata, server, target);
+            Ok(())
+        } else {
+            // default duration is longer for complex buffs
+            let duration = duration.unwrap_or(20.0);
+            let spec = misc_data_spec.ok_or_else(|| {
+                Content::localized_with_args("command-buff-data", [("buff", buff.clone())])
+            })?;
+            cast_buff_complex(buffkind, server, target, spec, strength, duration)
+        }
     }
 }
 
-fn cast_buff(kind: &str, data: BuffData, server: &mut Server, target: EcsEntity) -> CmdResult<()> {
-    if let Some(buffkind) = parse_buffkind(kind) {
-        let ecs = &server.state.ecs();
-        let mut buffs_all = ecs.write_storage::<comp::Buffs>();
-        let stats = ecs.read_storage::<comp::Stats>();
-        let healths = ecs.read_storage::<comp::Health>();
-        let time = ecs.read_resource::<Time>();
-        if let Some(mut buffs) = buffs_all.get_mut(target) {
-            buffs.insert(
-                Buff::new(
-                    buffkind,
-                    data,
-                    vec![],
-                    BuffSource::Command,
-                    *time,
-                    stats.get(target),
-                    healths.get(target),
-                ),
+fn cast_buff_complex(
+    buffkind: BuffKind,
+    server: &mut Server,
+    target: EcsEntity,
+    spec: String,
+    strength: f32,
+    duration: f64,
+) -> CmdResult<()> {
+    // explicit match to remember that this function exists
+    let misc_data = match buffkind {
+        BuffKind::Polymorphed => {
+            let Ok(npc::NpcBody(_id, mut body)) = spec.parse() else {
+                return Err(Content::localized_with_args("command-buff-body-unknown", [
+                    ("spec", spec.clone()),
+                ]));
+            };
+            MiscBuffData::Body(body())
+        },
+        BuffKind::Regeneration
+        | BuffKind::Saturation
+        | BuffKind::Potion
+        | BuffKind::Agility
+        | BuffKind::CampfireHeal
+        | BuffKind::Frenzied
+        | BuffKind::EnergyRegen
+        | BuffKind::IncreaseMaxEnergy
+        | BuffKind::IncreaseMaxHealth
+        | BuffKind::Invulnerability
+        | BuffKind::ProtectingWard
+        | BuffKind::Hastened
+        | BuffKind::Fortitude
+        | BuffKind::Reckless
+        | BuffKind::Flame
+        | BuffKind::Frigid
+        | BuffKind::Lifesteal
+        | BuffKind::ImminentCritical
+        | BuffKind::Fury
+        | BuffKind::Sunderer
+        | BuffKind::Defiance
+        | BuffKind::Bloodfeast
+        | BuffKind::Berserk
+        | BuffKind::Bleeding
+        | BuffKind::Cursed
+        | BuffKind::Burning
+        | BuffKind::Crippled
+        | BuffKind::Frozen
+        | BuffKind::Wet
+        | BuffKind::Ensnared
+        | BuffKind::Poisoned
+        | BuffKind::Parried
+        | BuffKind::PotionSickness
+        | BuffKind::Heatstroke => unreachable!("is_simple() above"),
+    };
+
+    let buffdata = BuffData::new(strength, Some(Secs(duration))).with_misc_data(misc_data);
+
+    cast_buff(buffkind, buffdata, server, target);
+    Ok(())
+}
+
+fn cast_buff(buffkind: BuffKind, data: BuffData, server: &mut Server, target: EcsEntity) {
+    let ecs = &server.state.ecs();
+    let mut buffs_all = ecs.write_storage::<comp::Buffs>();
+    let stats = ecs.read_storage::<comp::Stats>();
+    let healths = ecs.read_storage::<comp::Health>();
+    let time = ecs.read_resource::<Time>();
+    if let Some(mut buffs) = buffs_all.get_mut(target) {
+        buffs.insert(
+            Buff::new(
+                buffkind,
+                data,
+                vec![],
+                BuffSource::Command,
                 *time,
-            );
-        }
-        Ok(())
-    } else {
-        Err(Content::localized_with_args("command-buff-unknown", [(
-            "buff", kind,
-        )]))
+                stats.get(target),
+                healths.get(target),
+            ),
+            *time,
+        );
     }
 }
 

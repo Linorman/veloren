@@ -10,12 +10,13 @@ pub use admin::{AdminRecord, Admins};
 pub use banlist::{
     Ban, BanAction, BanEntry, BanError, BanErrorKind, BanInfo, BanKind, BanRecord, Banlist,
 };
-pub use server_description::ServerDescription;
+pub use server_description::ServerDescriptions;
 pub use whitelist::{Whitelist, WhitelistInfo, WhitelistRecord};
 
 use chrono::Utc;
 use common::{
     calendar::{Calendar, CalendarEvent},
+    consts::DAY_LENGTH_DEFAULT,
     resources::BattleMode,
     rtsim::WorldSettings,
 };
@@ -30,6 +31,8 @@ use std::{
 };
 use tracing::{error, warn};
 use world::sim::FileOpts;
+
+use self::server_description::ServerDescription;
 
 const DEFAULT_WORLD_SEED: u32 = 230;
 const CONFIG_DIR: &str = "server_config";
@@ -205,7 +208,7 @@ impl Default for Settings {
             world_seed: DEFAULT_WORLD_SEED,
             server_name: "Veloren Server".into(),
             max_players: 100,
-            day_length: 30.0,
+            day_length: DAY_LENGTH_DEFAULT,
             start_time: 9.0 * 3600.0,
             map_file: None,
             max_view_distance: Some(65),
@@ -361,7 +364,7 @@ const MIGRATION_UPGRADE_GUARANTEE: &str = "Any valid file of an old verison shou
 pub struct EditableSettings {
     pub whitelist: Whitelist,
     pub banlist: Banlist,
-    pub server_description: ServerDescription,
+    pub server_description: ServerDescriptions,
     pub admins: Admins,
 }
 
@@ -370,7 +373,7 @@ impl EditableSettings {
         Self {
             whitelist: Whitelist::load(data_dir),
             banlist: Banlist::load(data_dir),
-            server_description: ServerDescription::load(data_dir),
+            server_description: ServerDescriptions::load(data_dir),
             admins: Admins::load(data_dir),
         }
     }
@@ -378,8 +381,13 @@ impl EditableSettings {
     pub fn singleplayer(data_dir: &Path) -> Self {
         let load = Self::load(data_dir);
 
-        let mut server_description = ServerDescription::default();
-        *server_description = "Who needs friends anyway?".into();
+        let mut server_description = ServerDescriptions::default();
+        server_description
+            .descriptions
+            .insert("en".to_string(), ServerDescription {
+                motd: "Who needs friends anyway?".to_string(),
+                rules: None,
+            });
 
         let mut admins = Admins::default();
         // TODO: Let the player choose if they want to use admin commands or not

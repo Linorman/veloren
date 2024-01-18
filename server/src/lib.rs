@@ -306,6 +306,16 @@ impl Server {
             pools,
             world.sim().map_size_lg(),
             Arc::clone(&map.default_chunk),
+            |dispatcher_builder| {
+                add_local_systems(dispatcher_builder);
+                sys::msg::add_server_systems(dispatcher_builder);
+                sys::add_server_systems(dispatcher_builder);
+                #[cfg(feature = "worldgen")]
+                {
+                    rtsim::add_server_systems(dispatcher_builder);
+                    weather::add_server_systems(dispatcher_builder);
+                }
+            },
         );
         state.ecs_mut().insert(battlemode_buffer);
         state.ecs_mut().insert(settings.clone());
@@ -614,10 +624,9 @@ impl Server {
 
     pub fn get_server_info(&self) -> ServerInfo {
         let settings = self.state.ecs().fetch::<Settings>();
-        let editable_settings = self.state.ecs().fetch::<EditableSettings>();
+
         ServerInfo {
             name: settings.server_name.clone(),
-            description: (*editable_settings.server_description).clone(),
             git_hash: common::util::GIT_HASH.to_string(),
             git_date: common::util::GIT_DATE.to_string(),
             auth_provider: settings.auth_server_address.clone(),
@@ -752,16 +761,6 @@ impl Server {
         let mut state_tick_metrics = Default::default();
         self.state.tick(
             dt,
-            |dispatcher_builder| {
-                add_local_systems(dispatcher_builder);
-                sys::msg::add_server_systems(dispatcher_builder);
-                sys::add_server_systems(dispatcher_builder);
-                #[cfg(feature = "worldgen")]
-                {
-                    rtsim::add_server_systems(dispatcher_builder);
-                    weather::add_server_systems(dispatcher_builder);
-                }
-            },
             false,
             Some(&mut state_tick_metrics),
             &self.server_constants,

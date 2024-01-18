@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added hit_timing to BasicMelee abilities
 - A tavern building where npcs go to relax.
 - Toggle for walking instead of running (Default: `I`).
+- Added day duration slider configuration on map creation UI.
+- Potion of Agility
+- A way for servers to specify must-accept rules for players
 
 ### Changed
 
@@ -73,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed offset of items carried on backs when wearing cloaks and backpacks
 - Linearize light colors on the CPU rather than in shaders on the GPU
 - You can no longer stack self buffs
+- Renamed "Burning Potion" to "Potion of Combustion"
+- Render LoD terrain on the character selection screen
 
 ### Removed
 - Medium and large potions from all loot tables
@@ -91,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed bug where airship captains would mass generate after using /reload_chunks
 - Fixed french translation "Énergie Consommée" -> "Regain d'Énergie"
 - Fixed Perforate icon not displaying
+- Make cave entrances easier to follow
+- Renamed Twiggy Shoulders to match the Twig Armor set
+- No longer stack buffs of the same kind with equal attributes, this could lead to a DoS if ie. an entity stayed long enough in lava.
 
 ## [0.15.0] - 2023-07-01
 

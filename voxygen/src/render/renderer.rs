@@ -1451,7 +1451,7 @@ impl Renderer {
     /// Queue to obtain a screenshot on the next frame render
     pub fn create_screenshot(
         &mut self,
-        screenshot_handler: impl FnOnce(Result<image::DynamicImage, String>) + Send + 'static,
+        screenshot_handler: impl FnOnce(Result<image::RgbImage, String>) + Send + 'static,
     ) {
         // Queue screenshot
         self.take_screenshot = Some(Box::new(screenshot_handler));
@@ -1570,9 +1570,10 @@ pub struct AltIndices {
 
 /// The mode with which culling based on the camera position relative to the
 /// terrain is performed.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub enum CullingMode {
     /// We need to render all elements of the given structure
+    #[default]
     None,
     /// We only need to render surface and shallow (i.e: in the overlapping
     /// region) elements of the structure
