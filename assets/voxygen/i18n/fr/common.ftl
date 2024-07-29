@@ -42,13 +42,13 @@ common-video_settings = Options Vidéo
 common-sound_settings = Options Audio
 common-language_settings = Langage
 common-chat_settings = Réglages Chat
-common-accessibility_settings = Options Accessibilité
+common-accessibility_settings = Paramètres d'accessibilité
 common-networking_settings = Options Réseau
 common-connection_lost =
     Connexion perdue !
     Le serveur a-t-il redémarré ?
     Le client est-il à jour ?
-common-species-orc = Orc
+common-species-orc = Orque
 common-species-human = Humain
 common-species-dwarf = Nain
 common-species-elf = Elfe
@@ -113,3 +113,11 @@ common-sprite-chair = Chaise
 common-sprite-mud = Boue
 common-sprite-grave = Tombe
 common-sprite-crate = Boite
+common-stats-durability = Durabilité
+common-tool-shovel = Pelle
+common-stats-effect-power = Puissance d'effet
+common-sprite-signboard = Panneau d'affichage
+common-sprite-street_lamp = Lampes de rue
+common-sprite-lantern = Lanterne
+common-sprite-seashell_lantern = Lanterne coquillage
+common-sprite-firebowl_ground = Bol à feu

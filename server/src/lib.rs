@@ -1,10 +1,18 @@
 #![deny(unsafe_code)]
 #![allow(
     clippy::option_map_unit_fn,
+    clippy::blocks_in_conditions,
     clippy::needless_pass_by_ref_mut //until we find a better way for specs
 )]
 #![deny(clippy::clone_on_ref_ptr)]
-#![feature(box_patterns, let_chains, never_type, option_zip, unwrap_infallible)]
+#![feature(
+    box_patterns,
+    let_chains,
+    never_type,
+    option_zip,
+    unwrap_infallible,
+    const_type_name
+)]
 
 pub mod automod;
 mod character_creator;
@@ -33,7 +41,7 @@ pub mod sys;
 pub mod terrain_persistence;
 #[cfg(not(feature = "worldgen"))] mod test_world;
 
-mod weather;
+#[cfg(feature = "worldgen")] mod weather;
 
 pub mod wiring;
 
@@ -65,13 +73,18 @@ use crate::{
 use censor::Censor;
 #[cfg(not(feature = "worldgen"))]
 use common::grid::Grid;
+#[cfg(feature = "worldgen")]
+use common::terrain::TerrainChunkSize;
 use common::{
     assets::AssetExt,
     calendar::Calendar,
     character::{CharacterId, CharacterItem},
     cmd::ServerChatCommand,
     comp,
-    event::{EventBus, ServerEvent},
+    event::{
+        register_event_busses, ClientDisconnectEvent, ClientDisconnectWithoutPersistenceEvent,
+        EventBus, ExitIngameEvent, UpdateCharacterDataEvent,
+    },
     link::Is,
     mounting::{Volume, VolumeRider},
     region::RegionMap,
@@ -79,7 +92,8 @@ use common::{
     rtsim::RtSimEntity,
     shared_server_config::ServerConstants,
     slowjob::SlowJobPool,
-    terrain::{TerrainChunk, TerrainChunkSize},
+    terrain::TerrainChunk,
+    util::GIT_DATE_TIMESTAMP,
     vol::RectRasterableVol,
 };
 use common_base::prof_span;
@@ -97,11 +111,13 @@ use persistence::{
     character_updater::CharacterUpdater,
 };
 use prometheus::Registry;
-use specs::{Builder, Entity as EcsEntity, Entity, Join, LendJoin, WorldExt};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use specs::{
+    shred::SendDispatcher, Builder, Entity as EcsEntity, Entity, Join, LendJoin, WorldExt,
+};
 use std::{
-    i32,
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 #[cfg(not(feature = "worldgen"))]
@@ -109,6 +125,7 @@ use test_world::{IndexOwned, World};
 use tokio::runtime::Runtime;
 use tracing::{debug, error, info, trace, warn};
 use vek::*;
+use veloren_query_server::server::QueryServer;
 pub use world::{civ::WorldCivStage, sim::WorldSimStage, WorldGenerateStage};
 
 use crate::{
@@ -130,7 +147,7 @@ use crate::{chat::ChatCache, persistence::character_loader::CharacterScreenRespo
 use common::comp::Anchor;
 #[cfg(feature = "worldgen")]
 pub use world::{
-    sim::{FileOpts, GenOpts, WorldOpts, DEFAULT_WORLD_MAP},
+    sim::{FileOpts, GenOpts, WorldOpts, DEFAULT_WORLD_MAP, DEFAULT_WORLD_SEED},
     IndexOwned, World,
 };
 
@@ -219,6 +236,7 @@ pub struct Server {
     disconnect_all_clients_requested: bool,
 
     server_constants: ServerConstants,
+    event_dispatcher: SendDispatcher<'static>,
 }
 
 impl Server {
@@ -258,10 +276,15 @@ impl Server {
         let tick_metrics = TickMetrics::new(&registry).unwrap();
         let physics_metrics = PhysicsMetrics::new(&registry).unwrap();
         let server_event_metrics = metrics::ServerEventMetrics::new(&registry).unwrap();
+        let query_server_metrics = metrics::QueryServerMetrics::new(&registry).unwrap();
 
         let battlemode_buffer = BattleModeBuffer::default();
 
         let pools = State::pools(GameMode::Server);
+
+        // Load plugins before generating the world.
+        #[cfg(feature = "plugins")]
+        let plugin_mgr = PluginMgr::from_asset_or_default();
 
         #[cfg(feature = "worldgen")]
         let (world, index) = World::generate(
@@ -287,24 +310,30 @@ impl Server {
         #[cfg(feature = "worldgen")]
         let map = world.get_map_data(index.as_index_ref(), &pools);
         #[cfg(not(feature = "worldgen"))]
-        let map = WorldMapMsg {
+        let map = common_net::msg::WorldMapMsg {
             dimensions_lg: Vec2::zero(),
             max_height: 1.0,
             rgba: Grid::new(Vec2::new(1, 1), 1),
             horizons: [(vec![0], vec![0]), (vec![0], vec![0])],
             alt: Grid::new(Vec2::new(1, 1), 1),
             sites: Vec::new(),
+            possible_starting_sites: Vec::new(),
             pois: Vec::new(),
             default_chunk: Arc::new(world.generate_oob_chunk()),
         };
+
+        #[cfg(feature = "worldgen")]
+        let map_size_lg = world.sim().map_size_lg();
+        #[cfg(not(feature = "worldgen"))]
+        let map_size_lg = world.map_size_lg();
 
         let lod = lod::Lod::from_world(&world, index.as_index_ref(), &pools);
 
         report_stage(ServerInitStage::StartingSystems);
 
         let mut state = State::server(
-            pools,
-            world.sim().map_size_lg(),
+            Arc::clone(&pools),
+            map_size_lg,
             Arc::clone(&map.default_chunk),
             |dispatcher_builder| {
                 add_local_systems(dispatcher_builder);
@@ -316,14 +345,18 @@ impl Server {
                     weather::add_server_systems(dispatcher_builder);
                 }
             },
+            #[cfg(feature = "plugins")]
+            plugin_mgr,
         );
+        register_event_busses(state.ecs_mut());
         state.ecs_mut().insert(battlemode_buffer);
         state.ecs_mut().insert(settings.clone());
         state.ecs_mut().insert(editable_settings);
         state.ecs_mut().insert(DataDir {
             path: data_dir.to_owned(),
         });
-        state.ecs_mut().insert(EventBus::<ServerEvent>::default());
+
+        register_event_busses(state.ecs_mut());
         state.ecs_mut().insert(Vec::<ChunkRequest>::new());
         state
             .ecs_mut()
@@ -346,6 +379,7 @@ impl Server {
         state.ecs_mut().insert(tick_metrics);
         state.ecs_mut().insert(physics_metrics);
         state.ecs_mut().insert(server_event_metrics);
+        state.ecs_mut().insert(query_server_metrics);
         if settings.experimental_terrain_persistence {
             #[cfg(feature = "persistent_world")]
             {
@@ -371,6 +405,7 @@ impl Server {
             pool.configure("CHUNK_GENERATOR", |n| n / 2 + n / 4);
             pool.configure("CHUNK_SERIALIZER", |n| n / 2);
             pool.configure("RTSIM_SAVE", |_| 1);
+            pool.configure("WEATHER", |_| 1);
         }
         state
             .ecs_mut()
@@ -393,6 +428,9 @@ impl Server {
 
         let msm = comp::inventory::item::MaterialStatManifest::load().cloned();
         state.ecs_mut().insert(msm);
+
+        let rbm = common::recipe::RecipeBookManifest::load().cloned();
+        state.ecs_mut().insert(rbm);
 
         state.ecs_mut().insert(CharacterLoader::new(
             Arc::<RwLock<DatabaseSettings>>::clone(&database_settings),
@@ -464,7 +502,7 @@ impl Server {
             #[cfg(feature = "worldgen")]
             let size = world.sim().get_size();
             #[cfg(not(feature = "worldgen"))]
-            let size = Vec2::new(40, 40);
+            let size = world.map_size_lg().chunks().map(u32::from);
 
             let world_size = size.map(|e| e as i32) * TerrainChunk::RECT_SIZE.map(|e| e as i32);
             let world_aabb = Aabb {
@@ -515,28 +553,40 @@ impl Server {
                     match || -> Result<_, Box<dyn std::error::Error>> {
                         let key = fs::read(key_file_path)?;
                         let key = if key_file_path.extension().map_or(false, |x| x == "der") {
-                            rustls::PrivateKey(key)
+                            PrivateKeyDer::try_from(key).map_err(|_| "No valid pem key in file")?
                         } else {
                             debug!("convert pem key to der");
-                            let key = rustls_pemfile::read_all(&mut key.as_slice())?
-                                .into_iter()
+                            rustls_pemfile::read_all(&mut key.as_slice())
                                 .find_map(|item| match item {
-                                    Item::RSAKey(v) | Item::PKCS8Key(v) => Some(v),
-                                    Item::ECKey(_) => None,
-                                    Item::X509Certificate(_) => None,
-                                    _ => None,
+                                    Ok(Item::Pkcs1Key(v)) => Some(PrivateKeyDer::Pkcs1(v)),
+                                    Ok(Item::Pkcs8Key(v)) => Some(PrivateKeyDer::Pkcs8(v)),
+                                    Ok(Item::Sec1Key(v)) => Some(PrivateKeyDer::Sec1(v)),
+                                    Ok(Item::Crl(_)) => None,
+                                    Ok(Item::Csr(_)) => None,
+                                    Ok(Item::X509Certificate(_)) => None,
+                                    Ok(_) => None,
+                                    Err(e) => {
+                                        tracing::warn!(?e, "error while reading key_file");
+                                        None
+                                    },
                                 })
-                                .ok_or("No valid pem key in file")?;
-                            rustls::PrivateKey(key)
+                                .ok_or("No valid pem key in file")?
                         };
                         let cert_chain = fs::read(cert_file_path)?;
                         let cert_chain = if cert_file_path.extension().map_or(false, |x| x == "der")
                         {
-                            vec![rustls::Certificate(cert_chain)]
+                            vec![CertificateDer::from(cert_chain)]
                         } else {
                             debug!("convert pem cert to der");
-                            let certs = rustls_pemfile::certs(&mut cert_chain.as_slice())?;
-                            certs.into_iter().map(rustls::Certificate).collect()
+                            rustls_pemfile::certs(&mut cert_chain.as_slice())
+                                .filter_map(|item| match item {
+                                    Ok(cert) => Some(cert),
+                                    Err(e) => {
+                                        tracing::warn!(?e, "error while reading cert_file");
+                                        None
+                                    },
+                                })
+                                .collect()
                         };
                         let server_config = quinn::ServerConfig::with_single_cert(cert_chain, key)?;
                         Ok(server_config)
@@ -566,6 +616,32 @@ impl Server {
             }
         }
 
+        if let Some(addr) = settings.query_address {
+            use veloren_query_server::proto::ServerInfo;
+
+            const QUERY_SERVER_RATELIMIT: u16 = 120;
+
+            let (query_server_info_tx, query_server_info_rx) =
+                tokio::sync::watch::channel(ServerInfo {
+                    git_hash: *sys::server_info::GIT_HASH,
+                    git_timestamp: *GIT_DATE_TIMESTAMP,
+                    players_count: 0,
+                    player_cap: settings.max_players,
+                    battlemode: settings.gameplay.battle_mode.into(),
+                });
+            let mut query_server =
+                QueryServer::new(addr, query_server_info_rx, QUERY_SERVER_RATELIMIT);
+            let query_server_metrics =
+                Arc::new(Mutex::new(veloren_query_server::server::Metrics::default()));
+            let query_server_metrics2 = Arc::clone(&query_server_metrics);
+            runtime.spawn(async move {
+                let err = query_server.run(query_server_metrics2).await.err();
+                error!(?err, "Query server stopped unexpectedly");
+            });
+            state.ecs_mut().insert(query_server_info_tx);
+            state.ecs_mut().insert(query_server_metrics);
+        }
+
         runtime.block_on(network.listen(ListenAddr::Mpsc(14004)))?;
 
         let connection_handler = ConnectionHandler::new(network, &runtime);
@@ -588,7 +664,7 @@ impl Server {
                     return Err(Error::RtsimError(err));
                 },
             }
-            weather::init(&mut state, &world);
+            weather::init(&mut state);
         }
 
         let server_constants = ServerConstants {
@@ -608,6 +684,8 @@ impl Server {
             disconnect_all_clients_requested: false,
 
             server_constants,
+
+            event_dispatcher: Self::create_event_dispatcher(pools),
         };
 
         debug!(?settings, "created veloren server with");
@@ -819,7 +897,16 @@ impl Server {
             }
         }
 
-        // Prevent anchor entity chains which are not currently supported
+        // Prevent anchor entity chains which are not currently supported due to:
+        // * potential cycles?
+        // * unloading a chain could occur across an unbounded number of ticks with the
+        //   current implementation.
+        // * in particular, we want to be able to unload all entities in a
+        //   limited number of ticks when a database error occurs and kicks all
+        //   players (not quiet sure on exact time frame, since it already
+        //   takes a tick after unloading all chunks for entities to despawn?),
+        //   see this thread and the discussion linked from there:
+        //   https://gitlab.com/veloren/veloren/-/merge_requests/2668#note_634913847
         let anchors = self.state.ecs().read_storage::<Anchor>();
         let anchored_anchor_entities: Vec<Entity> = (
             &self.state.ecs().entities(),
@@ -830,7 +917,13 @@ impl Server {
                 Anchor::Entity(anchor_entity) => Some(*anchor_entity),
                 _ => None,
             })
-            .filter(|anchor_entity| anchors.get(*anchor_entity).is_some())
+            // We allow Anchor::Entity(_) -> Anchor::Chunk(_) connections, since they can't chain further.
+            //
+            // NOTE: The entity with `Anchor::Entity` will unload one tick after the entity with `Anchor::Chunk`.
+            .filter(|anchor_entity| match anchors.get(*anchor_entity) {
+                Some(Anchor::Entity(_)) => true,
+                Some(Anchor::Chunk(_)) | None => false
+            })
             .collect();
         drop(anchors);
 
@@ -987,7 +1080,7 @@ impl Server {
                             ),
                         },
                         CharacterScreenResponseKind::CharacterData(result) => {
-                            let message = match *result {
+                            match *result {
                                 Ok((character_data, skill_set_persistence_load_error)) => {
                                     let PersistedComponents {
                                         body,
@@ -1011,11 +1104,11 @@ impl Server {
                                     );
                                     // TODO: Does this need to be a server event? E.g. we could
                                     // just handle it here.
-                                    ServerEvent::UpdateCharacterData {
+                                    self.state.emit_event_now(UpdateCharacterDataEvent {
                                         entity: response.target_entity,
                                         components: character_data,
                                         metadata: skill_set_persistence_load_error,
-                                    }
+                                    })
                                 },
                                 Err(error) => {
                                     // We failed to load data for the character from the DB. Notify
@@ -1029,16 +1122,11 @@ impl Server {
                                     );
 
                                     // Clean up the entity data on the server
-                                    ServerEvent::ExitIngame {
+                                    self.state.emit_event_now(ExitIngameEvent {
                                         entity: response.target_entity,
-                                    }
+                                    })
                                 },
-                            };
-
-                            self.state
-                                .ecs()
-                                .read_resource::<EventBus<ServerEvent>>()
-                                .emit_now(message);
+                            }
                         },
                     }
                 },
@@ -1192,15 +1280,15 @@ impl Server {
             );
             for (_, entity) in (&clients, &entities).join() {
                 info!("Emitting client disconnect event for entity: {:?}", entity);
-                let event = if with_persistence {
-                    ServerEvent::ClientDisconnect(entity, comp::DisconnectReason::Kicked)
+                if with_persistence {
+                    self.state.emit_event_now(ClientDisconnectEvent(
+                        entity,
+                        comp::DisconnectReason::Kicked,
+                    ))
                 } else {
-                    ServerEvent::ClientDisconnectWithoutPersistence(entity)
+                    self.state
+                        .emit_event_now(ClientDisconnectWithoutPersistenceEvent(entity))
                 };
-                self.state
-                    .ecs()
-                    .read_resource::<EventBus<ServerEvent>>()
-                    .emit_now(event);
             }
 
             self.disconnect_all_clients_requested = false;
@@ -1301,66 +1389,45 @@ impl Server {
                     );
                     return;
                 };
-                let rs = plugin_manager.execute_event(
-                    &ecs_world,
-                    &plugin_api::event::ChatCommandEvent {
-                        command: name.clone(),
-                        command_args: args.clone(),
-                        player: plugin_api::event::Player { id: uid },
-                    },
-                );
-                match rs {
-                    Ok(e) => {
-                        if e.is_empty() {
-                            self.notify_client(
-                                entity,
-                                ServerGeneral::server_msg(
-                                    comp::ChatType::CommandError,
-                                    format!(
-                                        "Unknown command '/{}'.\nType '/help' for available \
-                                         commands",
-                                        name
-                                    ),
+                match plugin_manager.command_event(&ecs_world, &name, args.as_slice(), uid) {
+                    Err(common_state::plugin::CommandResults::UnknownCommand) => self
+                        .notify_client(
+                            entity,
+                            ServerGeneral::server_msg(
+                                comp::ChatType::CommandError,
+                                format!(
+                                    "Unknown command '/{name}'.\nType '/help' for available \
+                                     commands",
                                 ),
-                            );
-                        } else {
-                            e.into_iter().for_each(|e| match e {
-                                Ok(e) => {
-                                    if !e.is_empty() {
-                                        self.notify_client(
-                                            entity,
-                                            ServerGeneral::server_msg(
-                                                comp::ChatType::CommandInfo,
-                                                e.join("\n"),
-                                            ),
-                                        );
-                                    }
-                                },
-                                Err(e) => {
-                                    self.notify_client(
-                                        entity,
-                                        ServerGeneral::server_msg(
-                                            comp::ChatType::CommandError,
-                                            format!(
-                                                "Error occurred while executing command '/{}'.\n{}",
-                                                name, e
-                                            ),
-                                        ),
-                                    );
-                                },
-                            });
-                        }
+                            ),
+                        ),
+                    Ok(value) => {
+                        self.notify_client(
+                            entity,
+                            ServerGeneral::server_msg(
+                                comp::ChatType::CommandInfo,
+                                value.join("\n"),
+                            ),
+                        );
                     },
-                    Err(e) => {
-                        error!(?e, "Can't execute command {} {:?}", name, args);
+                    Err(common_state::plugin::CommandResults::PluginError(err)) => {
+                        self.notify_client(
+                            entity,
+                            ServerGeneral::server_msg(
+                                comp::ChatType::CommandError,
+                                format!("Error occurred while executing command '/{name}'.\n{err}"),
+                            ),
+                        );
+                    },
+                    Err(common_state::plugin::CommandResults::HostError(err)) => {
+                        error!(?err, ?name, ?args, "Can't execute command");
                         self.notify_client(
                             entity,
                             ServerGeneral::server_msg(
                                 comp::ChatType::CommandError,
                                 format!(
-                                    "Internal error while executing '/{}'.\nContact the server \
-                                     administrator",
-                                    name
+                                    "Internal error {err:?} while executing '/{name}'.\nContact \
+                                     the server administrator",
                                 ),
                             ),
                         );

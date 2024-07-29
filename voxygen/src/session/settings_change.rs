@@ -49,7 +49,6 @@ pub enum Chat {
 pub enum Control {
     ChangeBinding(GameInput),
     RemoveBinding(GameInput),
-    ToggleKeybindingMode,
     ResetKeyBindings,
 }
 #[derive(Clone)]
@@ -76,6 +75,9 @@ pub enum Gameplay {
     ChangeAutoCamera(bool),
     ChangeBowZoom(bool),
     ChangeZoomLock(bool),
+
+    AdjustAimOffsetX(f32),
+    AdjustAimOffsetY(f32),
 
     ResetGameplaySettings,
 }
@@ -360,9 +362,6 @@ impl SettingsChange {
                 Control::RemoveBinding(game_input) => {
                     settings.controls.remove_binding(game_input);
                 },
-                Control::ToggleKeybindingMode => {
-                    global_state.window.toggle_keybinding_mode();
-                },
                 Control::ResetKeyBindings => {
                     settings.controls = ControlSettings::default();
                 },
@@ -426,6 +425,12 @@ impl SettingsChange {
                     },
                     Gameplay::ChangeZoomLock(state) => {
                         settings.gameplay.zoom_lock = state;
+                    },
+                    Gameplay::AdjustAimOffsetX(offset) => {
+                        settings.gameplay.aim_offset_x = offset;
+                    },
+                    Gameplay::AdjustAimOffsetY(offset) => {
+                        settings.gameplay.aim_offset_y = offset;
                     },
                     Gameplay::ResetGameplaySettings => {
                         // Reset Gameplay Settings

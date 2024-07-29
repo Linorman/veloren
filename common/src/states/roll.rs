@@ -4,7 +4,7 @@ use crate::{
         character_state::{AttackFilters, OutputEvents},
         CharacterState, StateUpdate,
     },
-    event::ServerEvent,
+    event::BuffEvent,
     states::{
         behavior::{CharacterBehavior, JoinData},
         utils::*,
@@ -60,7 +60,7 @@ impl CharacterBehavior for Data {
 
         match self.stage_section {
             StageSection::Buildup => {
-                handle_move(data, &mut update, 1.0);
+                handle_move(data, &mut update, 0.3);
                 if self.timer < self.static_data.buildup_duration {
                     // Build up
                     update.character = CharacterState::Roll(Data {
@@ -69,7 +69,7 @@ impl CharacterBehavior for Data {
                     });
                 } else {
                     // Remove burning effect if active
-                    output_events.emit_server(ServerEvent::Buff {
+                    output_events.emit_server(BuffEvent {
                         entity: data.entity,
                         buff_change: BuffChange::RemoveByKind(BuffKind::Burning),
                     });
@@ -119,7 +119,11 @@ impl CharacterBehavior for Data {
                 {
                     // Recover
                     update.character = CharacterState::Roll(Data {
-                        timer: tick_attack_or_default(data, self.timer, None),
+                        timer: tick_attack_or_default(
+                            data,
+                            self.timer,
+                            Some(data.stats.recovery_speed_modifier),
+                        ),
                         ..*self
                     });
                 } else {

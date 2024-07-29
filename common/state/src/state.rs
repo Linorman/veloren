@@ -8,7 +8,7 @@ use common::uid::IdMaps;
 use common::{
     calendar::Calendar,
     comp,
-    event::{EventBus, LocalEvent, ServerEvent},
+    event::{EventBus, LocalEvent},
     link::Is,
     mounting::{Mount, Rider, VolumeRider, VolumeRiders},
     outcome::Outcome,
@@ -156,6 +156,7 @@ impl State {
         map_size_lg: MapSizeLg,
         default_chunk: Arc<TerrainChunk>,
         add_systems: impl Fn(&mut DispatcherBuilder),
+        #[cfg(feature = "plugins")] plugin_mgr: PluginMgr,
     ) -> Self {
         Self::new(
             GameMode::Client,
@@ -163,6 +164,8 @@ impl State {
             map_size_lg,
             default_chunk,
             add_systems,
+            #[cfg(feature = "plugins")]
+            plugin_mgr,
         )
     }
 
@@ -172,6 +175,7 @@ impl State {
         map_size_lg: MapSizeLg,
         default_chunk: Arc<TerrainChunk>,
         add_systems: impl Fn(&mut DispatcherBuilder),
+        #[cfg(feature = "plugins")] plugin_mgr: PluginMgr,
     ) -> Self {
         Self::new(
             GameMode::Server,
@@ -179,6 +183,8 @@ impl State {
             map_size_lg,
             default_chunk,
             add_systems,
+            #[cfg(feature = "plugins")]
+            plugin_mgr,
         )
     }
 
@@ -188,6 +194,7 @@ impl State {
         map_size_lg: MapSizeLg,
         default_chunk: Arc<TerrainChunk>,
         add_systems: impl Fn(&mut DispatcherBuilder),
+        #[cfg(feature = "plugins")] plugin_mgr: PluginMgr,
     ) -> Self {
         prof_span!(guard, "create dispatcher");
         let mut dispatch_builder =
@@ -201,7 +208,14 @@ impl State {
         drop(guard);
 
         Self {
-            ecs: Self::setup_ecs_world(game_mode, Arc::clone(&pools), map_size_lg, default_chunk),
+            ecs: Self::setup_ecs_world(
+                game_mode,
+                Arc::clone(&pools),
+                map_size_lg,
+                default_chunk,
+                #[cfg(feature = "plugins")]
+                plugin_mgr,
+            ),
             thread_pool: pools,
             dispatcher,
         }
@@ -215,6 +229,7 @@ impl State {
         thread_pool: Arc<ThreadPool>,
         map_size_lg: MapSizeLg,
         default_chunk: Arc<TerrainChunk>,
+        #[cfg(feature = "plugins")] mut plugin_mgr: PluginMgr,
     ) -> specs::World {
         prof_span!("State::setup_ecs_world");
         let mut ecs = specs::World::new();
@@ -228,13 +243,14 @@ impl State {
         ecs.register::<comp::ActiveAbilities>();
         ecs.register::<comp::Buffs>();
         ecs.register::<comp::Auras>();
+        ecs.register::<comp::EnteredAuras>();
         ecs.register::<comp::Energy>();
         ecs.register::<comp::Combo>();
         ecs.register::<comp::Health>();
         ecs.register::<comp::Poise>();
         ecs.register::<comp::CanBuild>();
         ecs.register::<comp::LightEmitter>();
-        ecs.register::<comp::Item>();
+        ecs.register::<comp::PickupItem>();
         ecs.register::<comp::Scale>();
         ecs.register::<Is<Mount>>();
         ecs.register::<Is<Rider>>();
@@ -331,7 +347,6 @@ impl State {
         ecs.insert(SlowJobPool::new(slow_limit, 10_000, thread_pool));
 
         // TODO: only register on the server
-        ecs.insert(EventBus::<ServerEvent>::default());
         ecs.insert(comp::group::GroupManager::default());
         ecs.insert(SysMetrics::default());
         ecs.insert(PhysicsMetrics::default());
@@ -341,32 +356,21 @@ impl State {
 
         // Load plugins from asset directory
         #[cfg(feature = "plugins")]
-        ecs.insert(match PluginMgr::from_assets() {
-            Ok(mut plugin_mgr) => {
-                let ecs_world = EcsWorld {
-                    entities: &ecs.entities(),
-                    health: ecs.read_component().into(),
-                    uid: ecs.read_component().into(),
-                    id_maps: &ecs.read_resource::<IdMaps>().into(),
-                    player: ecs.read_component().into(),
-                };
-                if let Err(e) = plugin_mgr
-                    .execute_event(&ecs_world, &plugin_api::event::PluginLoadEvent {
-                        game_mode,
-                    })
-                {
-                    tracing::debug!(?e, "Failed to run plugin init");
-                    tracing::info!("Plugins disabled, enable debug logging for more information.");
-                    PluginMgr::default()
-                } else {
-                    plugin_mgr
-                }
-            },
-            Err(e) => {
-                tracing::debug!(?e, "Failed to read plugins from assets");
+        ecs.insert({
+            let ecs_world = EcsWorld {
+                entities: &ecs.entities(),
+                health: ecs.read_component().into(),
+                uid: ecs.read_component().into(),
+                id_maps: &ecs.read_resource::<IdMaps>().into(),
+                player: ecs.read_component().into(),
+            };
+            if let Err(e) = plugin_mgr.load_event(&ecs_world, game_mode) {
+                tracing::debug!(?e, "Failed to run plugin init");
                 tracing::info!("Plugins disabled, enable debug logging for more information.");
                 PluginMgr::default()
-            },
+            } else {
+                plugin_mgr
+            }
         });
 
         ecs
@@ -415,6 +419,15 @@ impl State {
     /// Read a component attributed to a particular entity.
     pub fn read_component_copied<C: Component + Copy>(&self, entity: EcsEntity) -> Option<C> {
         self.ecs.read_storage().get(entity).copied()
+    }
+
+    /// # Panics
+    /// Panics if `EventBus<E>` is borrowed
+    pub fn emit_event_now<E>(&self, event: E)
+    where
+        EventBus<E>: Resource,
+    {
+        self.ecs.write_resource::<EventBus<E>>().emit_now(event)
     }
 
     /// Given mutable access to the resource R, assuming the resource
@@ -527,12 +540,15 @@ impl State {
     }
 
     /// Removes every chunk of the terrain.
-    pub fn clear_terrain(&mut self) {
+    pub fn clear_terrain(&mut self) -> usize {
         let removed_chunks = &mut self.ecs.write_resource::<TerrainChanges>().removed_chunks;
 
-        self.terrain_mut().drain().for_each(|(key, _)| {
-            removed_chunks.insert(key);
-        });
+        self.terrain_mut()
+            .drain()
+            .map(|(key, _)| {
+                removed_chunks.insert(key);
+            })
+            .count()
     }
 
     /// Insert the provided chunk into this state's terrain.
@@ -557,7 +573,7 @@ impl State {
 
     /// Remove the chunk with the given key from this state's terrain, if it
     /// exists.
-    pub fn remove_chunk(&mut self, key: Vec2<i32>) {
+    pub fn remove_chunk(&mut self, key: Vec2<i32>) -> bool {
         if self
             .ecs
             .write_resource::<TerrainGrid>()
@@ -568,6 +584,10 @@ impl State {
                 .write_resource::<TerrainChanges>()
                 .removed_chunks
                 .insert(key);
+
+            true
+        } else {
+            false
         }
     }
 
@@ -685,9 +705,7 @@ impl State {
         self.dispatcher.dispatch(&self.ecs);
         drop(guard);
 
-        section_span!(guard, "maintain ecs");
-        self.ecs.maintain();
-        drop(guard);
+        self.maintain_ecs();
 
         if update_terrain {
             self.apply_terrain_changes_internal(true, block_update);
@@ -728,6 +746,11 @@ impl State {
             }
         }
         drop(guard);
+    }
+
+    pub fn maintain_ecs(&mut self) {
+        span!(_guard, "maintain ecs");
+        self.ecs.maintain();
     }
 
     /// Clean up the state after a tick.

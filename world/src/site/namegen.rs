@@ -553,8 +553,12 @@ impl<'a, R: Rng> NameGen<'a, R> {
         let mut name = String::new();
         name += start.choose(self.rng).unwrap();
         for _ in 0..self.approx_syllables.saturating_sub(2) {
-            name += vowel.choose(self.rng).unwrap();
-            name += middle.choose(self.rng).unwrap();
+            if !vowel.is_empty() {
+                name += vowel.choose(self.rng).unwrap()
+            };
+            if !middle.is_empty() {
+                name += middle.choose(self.rng).unwrap();
+            }
         }
         name += end.choose(self.rng).unwrap();
 
@@ -662,6 +666,62 @@ impl<'a, R: Rng> NameGen<'a, R> {
             "wad", "tab", "med", "mad", "afa", "man", "oubi", "hir", "baz", "yen", "kh", "ah",
             "dek", "fir", "ish", "rad", "iri", "am", "if", "van", "rik", "kat", "akan", "ikan",
             "illah", "ulus", "fard",
+        ];
+        self.generate_theme_from_parts(&start, &middle, &vowel, &end)
+    }
+
+    // japanese inspired location names for haniwa
+    pub fn generate_haniwa(&mut self) -> String {
+        let start = [
+            "a", "e", "o", "i", "u", "ka", "ki", "ku", "ke", "ko", "sa", "shi", "su", "se", "so",
+            "ta", "chi", "tsu", "te", "to", "na", "ne", "no", "ni", "nu", "ha", "hi", "fu", "he",
+            "ho", "ma", "mi", "mu", "me", "mo", "ra", "ri", "ru", "re", "ro", "wa", "ya", "yu",
+            "yo", "ga", "gi", "gu", "ge", "go", "za", "ji", "zu", "ze", "zo", "da", "de", "do",
+            "jo", "ju", "ja", "sho", "shu", "sha", "kya", "kyu", "kyo", "gya", "gyu", "gyo", "ba",
+            "bi", "bu", "be", "bo", "hya", "hyo", "ryu", "ryo",
+        ];
+        let vowel = [];
+        let middle = [
+            "a", "e", "o", "i", "u", "ka", "ki", "ku", "ke", "ko", "sa", "shi", "su", "se", "so",
+            "ta", "chi", "tsu", "te", "to", "na", "ne", "no", "ni", "nu", "ha", "hi", "fu", "he",
+            "ho", "ma", "mi", "mu", "me", "mo", "ra", "ri", "ru", "re", "ro", "wa", "ya", "yu",
+            "yo", "ga", "gi", "gu", "ge", "go", "za", "ji", "zu", "ze", "zo", "da", "de", "do",
+            "n", "jo", "ju", "ja", "sho", "shu", "sha", "pa", "pi", "pu", "pe", "po",
+        ];
+        let end = [
+            "maru", "mura", "machi", "yama", "da", "do", "don", "den", "fun", "taro", "dachi",
+            "mon", "ta", "yo", "chi", "poko", "gami", "ji", "guchi", "gachi", "goku", "gasha",
+            "do", "to", "saka", "zaru", "nami", "numa", "kichi", "juro", "jo", "keshi", "gara",
+            "goro", "tatsu", "tetsu", "niwa", "mo", "no", "nojo", "hachi", "ichi", "san", "saki",
+            "shima", "tsuchi", "gumo", "toko", "zuchi", "shi", "shiro", "jiro", "sho", "shu",
+            "tsu", "hara", "hama", "naga", "kan", "ken", "hage", "tai", "gyo", "kyo", "zo", "gu",
+            "zaki", "dai", "moto", "me", "saki", "kami", "gata", "date", "kawa", "gawa", "garu",
+            "tami", "yoro", "hiro", "ki", "kai", "gato", "mizu", "gin", "gon", "ppu", "matsu",
+            "yake", "koku", "miya", "zawa", "sen", "shiro", "kuro", "ppo", "kata", "riku", "sha",
+            "ishi", "yoko", "su", "gi", "ko", "hagi", "wa",
+        ];
+        self.generate_theme_from_parts(&start, &middle, &vowel, &end)
+    }
+
+    // chinese inspired location names for terracotta ruins
+    pub fn generate_terracotta(&mut self) -> String {
+        let start = [
+            "wang", "li", "zhang", "liu", "chen", "yang", "gong", "zhao", "wu", "zhou", "ming",
+            "jin", "xiao", "feng", "ho", "xiang", "yuan", "yu", "chien", "xi", "qin", "dao", "bao",
+            "ping", "qu", "yan", "deng", "ku", "ko", "la", "ge", "fu", "gao", "yong", "wo", "qi",
+            "mo", "gong", "shi", "xing", "xian", "biao", "kai", "bei", "ga", "zhou", "liu", "ba",
+            "fei", "tui", "de", "teng", "shou", "xiong", "diao", "lei", "shan", "shin", "pin",
+            "gin", "gen", "huen", "san", "hong", "long", "kon", "jing", "meng", "mei",
+        ];
+        let middle = [];
+        let vowel = [];
+        let end = [
+            "tian", "shi", "zhong", "xie", "biao", "neng", "zuo", "ze", "zhi", "hao", "pao",
+            "liang", "yong", "chou", "zhou", "peng", "yang", "huang", "bo", "yao", "fu", "xia",
+            "chen", "ling", "jia", "xu", "gou", "ya", "lang", "he", "ho", "nan", "hua", "xue",
+            "ji", "jian", "jiu", "xi", "ling", "dan", "dian", "shin", "gao", "yi", "zuo", "san",
+            "jie", "hua", "jin", "zhi", "zhe", "sing", "zai", "hun", "fen", "nen", "huan", "bian",
+            "cha", "wu", "wei", "jiao", "hu", "he", "bao", "bi",
         ];
         self.generate_theme_from_parts(&start, &middle, &vowel, &end)
     }

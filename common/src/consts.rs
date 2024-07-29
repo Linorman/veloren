@@ -4,6 +4,7 @@ pub const MAX_MOUNT_RANGE: f32 = 5.0;
 pub const MAX_SPRITE_MOUNT_RANGE: f32 = 2.0;
 pub const MAX_TRADE_RANGE: f32 = 20.0;
 pub const MAX_NPCINTERACT_RANGE: f32 = 30.0;
+pub const MAX_INTERACT_RANGE: f32 = 5.0;
 
 pub const GRAVITY: f32 = 25.0;
 pub const FRIC_GROUND: f32 = 0.15;
@@ -29,10 +30,6 @@ pub const MIN_RECOMMENDED_RAYON_THREADS: usize = 2;
 pub const MIN_RECOMMENDED_TOKIO_THREADS: usize = 2;
 
 pub const SOUND_TRAVEL_DIST_PER_VOLUME: f32 = 3.0;
-
-// Stat increase per level (multiplied by 10 compared to what you'll see in UI)
-pub const ENERGY_PER_LEVEL: u16 = 5;
-pub const HP_PER_LEVEL: u16 = 5;
 
 pub const TELEPORTER_RADIUS: f32 = 3.;
 

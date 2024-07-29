@@ -22,7 +22,7 @@ use common::{
         Content,
     },
     path::Path,
-    rtsim::{Actor, ChunkResource, NpcInput, Profession, Role, SiteId},
+    rtsim::{Actor, ChunkResource, NpcInput, PersonalityTrait, Profession, Role, SiteId},
     spiral::Spiral2d,
     store::Id,
     terrain::{CoordinateConversions, TerrainChunkSize},
@@ -66,7 +66,7 @@ struct DefaultState {
 
 fn path_in_site(start: Vec2<i32>, end: Vec2<i32>, site: &site2::Site) -> PathResult<Vec2<i32>> {
     let heuristic = |tile: &Vec2<i32>, _: &Vec2<i32>| tile.as_::<f32>().distance(end.as_());
-    let mut astar = Astar::new(1000, start, BuildHasherDefault::<FxHasher64>::default());
+    let mut astar = Astar::new(1_000, start, BuildHasherDefault::<FxHasher64>::default());
 
     let transition = |a: Vec2<i32>, b: Vec2<i32>| {
         let distance = a.as_::<f32>().distance(b.as_());
@@ -212,7 +212,7 @@ fn path_site(
     }
 }
 
-fn path_towns(
+fn path_between_towns(
     start: SiteId,
     end: SiteId,
     sites: &Sites,
@@ -331,7 +331,6 @@ fn idle<S: State>() -> impl Action<S> + Clone {
 
 /// Try to walk toward a 3D position without caring for obstacles.
 fn goto<S: State>(wpos: Vec3<f32>, speed_factor: f32, goal_dist: f32) -> impl Action<S> {
-    const STEP_DIST: f32 = 24.0;
     const WAYPOINT_DIST: f32 = 12.0;
 
     just(move |ctx, waypoint: &mut Option<Vec3<f32>>| {
@@ -344,10 +343,6 @@ fn goto<S: State>(wpos: Vec3<f32>, speed_factor: f32, goal_dist: f32) -> impl Ac
 
         // Get the next waypoint on the route toward the goal
         let waypoint = waypoint.get_or_insert_with(|| {
-            let rpos = wpos - ctx.npc.wpos;
-            let len = rpos.magnitude();
-            let wpos = ctx.npc.wpos + (rpos / len) * len.min(STEP_DIST);
-
             wpos.with_z(ctx.world.sim().get_surface_alt_approx(wpos.xy().as_()))
         });
 
@@ -397,7 +392,12 @@ fn goto_flying<S: State>(
     .stop_if(move |ctx: &mut NpcCtx| {
         ctx.npc.wpos.xy().distance_squared(wpos.xy()) < goal_dist.powi(2)
     })
-    .debug(move || format!("goto {}, {}, {}", wpos.x, wpos.y, wpos.z))
+    .debug(move || {
+        format!(
+            "goto flying ({}, {}, {}), goal dist {}",
+            wpos.x, wpos.y, wpos.z, goal_dist
+        )
+    })
     .map(|_, _| {})
 }
 
@@ -406,7 +406,12 @@ fn goto_flying<S: State>(
 fn goto_2d<S: State>(wpos2d: Vec2<f32>, speed_factor: f32, goal_dist: f32) -> impl Action<S> {
     now(move |ctx, _| {
         let wpos = wpos2d.with_z(ctx.world.sim().get_surface_alt_approx(wpos2d.as_()));
-        goto(wpos, speed_factor, goal_dist)
+        goto(wpos, speed_factor, goal_dist).debug(move || {
+            format!(
+                "goto 2d ({}, {}), z {}, goal dist {}",
+                wpos2d.x, wpos2d.y, wpos.z, goal_dist
+            )
+        })
     })
 }
 
@@ -431,6 +436,12 @@ fn goto_2d_flying<S: State>(
             waypoint_dist,
             height_offset,
         )
+        .debug(move || {
+            format!(
+                "goto 2d flying ({}, {}), goal dist {}",
+                wpos2d.x, wpos2d.y, goal_dist
+            )
+        })
     })
 }
 
@@ -439,6 +450,7 @@ where
     F: FnMut(&mut NpcCtx) -> Option<Vec2<f32>> + Clone + Send + Sync + 'static,
 {
     until(move |ctx, next_point: &mut F| {
+        // Pick next waypoint, return if path ended
         let wpos = next_point(ctx)?;
 
         let wpos_site = |wpos: Vec2<f32>| {
@@ -448,13 +460,24 @@ where
                 .and_then(|chunk| chunk.sites.first().copied())
         };
 
-        // If we're traversing within a site, to intra-site pathfinding
+        let wpos_sites_contain = |wpos: Vec2<f32>, site: Id<world::site::Site>| {
+            ctx.world
+                .sim()
+                .get(wpos.as_().wpos_to_cpos())
+                .map(|chunk| chunk.sites.contains(&site))
+                .unwrap_or(false)
+        };
+
+        let npc_wpos = ctx.npc.wpos;
+
+        // If we're traversing within a site, do intra-site pathfinding
         if let Some(site) = wpos_site(wpos) {
             let mut site_exit = wpos;
-            while let Some(next) = next_point(ctx).filter(|next| wpos_site(*next) == Some(site)) {
+            while let Some(next) = next_point(ctx).filter(|next| wpos_sites_contain(*next, site)) {
                 site_exit = next;
             }
 
+            // Navigate through the site to the site exit
             if let Some(path) = path_site(wpos, site_exit, site, ctx.index) {
                 Some(Either::Left(
                     seq(path.into_iter().map(move |wpos| goto_2d(wpos, 1.0, 8.0))).then(goto_2d(
@@ -464,13 +487,34 @@ where
                     )),
                 ))
             } else {
-                Some(Either::Right(goto_2d(site_exit, speed_factor, 8.0)))
+                // No intra-site path found, just attempt to move towards the exit node
+                Some(Either::Right(
+                    goto_2d(site_exit, speed_factor, 8.0)
+                        .debug(move || {
+                            format!(
+                                "direct from {}, {}, ({}) to site exit at {}, {}",
+                                npc_wpos.x, npc_wpos.y, npc_wpos.z, site_exit.x, site_exit.y
+                            )
+                        })
+                        .boxed(),
+                ))
             }
         } else {
-            Some(Either::Right(goto_2d(wpos, speed_factor, 8.0)))
+            // We're in the middle of a road, just go to the next waypoint
+            Some(Either::Right(
+                goto_2d(wpos, speed_factor, 8.0)
+                    .debug(move || {
+                        format!(
+                            "from {}, {}, ({}) to the next waypoint at {}, {}",
+                            npc_wpos.x, npc_wpos.y, npc_wpos.z, wpos.x, wpos.y
+                        )
+                    })
+                    .boxed(),
+            ))
         }
     })
     .with_state(next_point)
+    .debug(|| "traverse points")
 }
 
 /// Try to travel to a site. Where practical, paths will be taken.
@@ -483,7 +527,7 @@ fn travel_to_point<S: State>(wpos: Vec2<f32>, speed_factor: f32) -> impl Action<
         let mut points = (1..n as usize + 1).map(move |i| start + diff * (i as f32 / n));
         traverse_points(move |_| points.next(), speed_factor)
     })
-    .debug(|| "travel to point")
+    .debug(move || format!("travel to point {}, {}", wpos.x, wpos.y))
 }
 
 /// Try to travel to a site. Where practical, paths will be taken.
@@ -496,16 +540,16 @@ fn travel_to_site<S: State>(tgt_site: SiteId, speed_factor: f32) -> impl Action<
         // If we're currently in a site, try to find a path to the target site via
         // tracks
         if let Some(current_site) = ctx.npc.current_site
-            && let Some(tracks) = path_towns(current_site, tgt_site, sites, ctx.world)
+            && let Some(tracks) = path_between_towns(current_site, tgt_site, sites, ctx.world)
         {
 
-            let mut nodes = tracks.path
+            let mut path_nodes = tracks.path
                 .into_iter()
                 .flat_map(move |(track_id, reversed)| (0..)
                     .map(move |node_idx| (node_idx, track_id, reversed)));
 
             traverse_points(move |ctx| {
-                let (node_idx, track_id, reversed) = nodes.next()?;
+                let (node_idx, track_id, reversed) = path_nodes.next()?;
                 let nodes = &ctx.world.civs().tracks.get(track_id).path().nodes;
 
                 // Handle the case where we walk paths backward
@@ -568,7 +612,7 @@ fn travel_to_site<S: State>(tgt_site: SiteId, speed_factor: f32) -> impl Action<
             //     .boxed()
         } else if let Some(site) = sites.get(tgt_site) {
             // If all else fails, just walk toward the target site in a straight line
-            travel_to_point(site.wpos.map(|e| e as f32 + 0.5), speed_factor).boxed()
+            travel_to_point(site.wpos.map(|e| e as f32 + 0.5), speed_factor).debug(|| "travel to point fallback").boxed()
         } else {
             // If we can't find a way to get to the site at all, there's nothing more to be done
             finish().boxed()
@@ -594,26 +638,63 @@ fn talk_to<S: State>(tgt: Actor, _subject: Option<Subject>) -> impl Action<S> + 
                 && let Some(current_site) = ctx.state.data().sites.get(current_site)
                 && let Some(mention_site) = current_site.nearby_sites_by_size.choose(&mut ctx.rng)
                 && let Some(mention_site) = ctx.state.data().sites.get(*mention_site)
-                && let Some(mention_site_name) = mention_site.world_site
+                && let Some(mention_site_name) = mention_site
+                    .world_site
                     .map(|ws| ctx.index.sites.get(ws).name().to_string())
             {
                 Content::localized_with_args("npc-speech-tell_site", [
                     ("site", Content::Plain(mention_site_name)),
-                    ("dir", Direction::from_dir(mention_site.wpos.as_() - ctx.npc.wpos.xy()).localize_npc()),
-                    ("dist", Distance::from_length(mention_site.wpos.as_().distance(ctx.npc.wpos.xy()) as i32).localize_npc()),
+                    (
+                        "dir",
+                        Direction::from_dir(mention_site.wpos.as_() - ctx.npc.wpos.xy())
+                            .localize_npc(),
+                    ),
+                    (
+                        "dist",
+                        Distance::from_length(
+                            mention_site.wpos.as_().distance(ctx.npc.wpos.xy()) as i32
+                        )
+                        .localize_npc(),
+                    ),
                 ])
+            // Mention current site
+            } else if ctx.rng.gen_bool(0.3)
+                && let Some(current_site) = ctx.npc.current_site
+                && let Some(current_site) = ctx.state.data().sites.get(current_site)
+                && let Some(current_site_name) = current_site
+                    .world_site
+                    .map(|ws| ctx.index.sites.get(ws).name().to_string())
+            {
+                Content::localized_with_args("npc-speech-site", [(
+                    "site",
+                    Content::Plain(current_site_name),
+                )])
+
             // Mention nearby monsters
             } else if ctx.rng.gen_bool(0.3)
-                && let Some(monster) = ctx.state.data().npcs
+                && let Some(monster) = ctx
+                    .state
+                    .data()
+                    .npcs
                     .values()
                     .filter(|other| matches!(&other.role, Role::Monster))
                     .min_by_key(|other| other.wpos.xy().distance(ctx.npc.wpos.xy()) as i32)
             {
                 Content::localized_with_args("npc-speech-tell_monster", [
-                    ("body", monster.body.localize()),
-                    ("dir", Direction::from_dir(monster.wpos.xy() - ctx.npc.wpos.xy()).localize_npc()),
-                    ("dist", Distance::from_length(monster.wpos.xy().distance(ctx.npc.wpos.xy()) as i32).localize_npc()),
+                    ("body", monster.body.localize_npc()),
+                    (
+                        "dir",
+                        Direction::from_dir(monster.wpos.xy() - ctx.npc.wpos.xy()).localize_npc(),
+                    ),
+                    (
+                        "dist",
+                        Distance::from_length(monster.wpos.xy().distance(ctx.npc.wpos.xy()) as i32)
+                            .localize_npc(),
+                    ),
                 ])
+            // Specific night dialog
+            } else if ctx.rng.gen_bool(0.6) && DayPeriod::from(ctx.time_of_day.0).is_dark() {
+                Content::localized("npc-speech-night")
             } else {
                 ctx.npc.personality.get_generic_comment(&mut ctx.rng)
             };
@@ -635,7 +716,10 @@ fn talk_to<S: State>(tgt: Actor, _subject: Option<Subject>) -> impl Action<S> + 
 fn socialize() -> impl Action<EveryRange> + Clone {
     now(move |ctx, socialize: &mut EveryRange| {
         // Skip most socialising actions if we're not loaded
-        if matches!(ctx.npc.mode, SimulationMode::Loaded) && socialize.should(ctx) {
+        if matches!(ctx.npc.mode, SimulationMode::Loaded)
+            && socialize.should(ctx)
+            && !ctx.npc.personality.is(PersonalityTrait::Introverted)
+        {
             // Sometimes dance
             if ctx.rng.gen_bool(0.15) {
                 return just(|ctx, _| ctx.controller.do_dance(None))
@@ -853,7 +937,7 @@ fn villager(visiting_site: SiteId) -> impl Action<DefaultState> {
         }
         // Go do something fun on evenings and holidays, or on random days.
         else if
-            // Ain't no rest for the wicked 
+            // Ain't no rest for the wicked
             !matches!(ctx.npc.profession(), Some(Profession::Guard))
             && (matches!(day_period, DayPeriod::Evening) || is_weekend || ctx.rng.gen_bool(0.05)) {
             let mut fun_stuff = Vec::new();
@@ -1348,12 +1432,39 @@ fn bird_large() -> impl Action<DefaultState> {
                             && site.world_site.map_or(false, |site| {
                             match ctx.npc.body {
                                 common::comp::Body::BirdLarge(b) => match b.species {
-                                    bird_large::Species::SeaWyvern => matches!(&ctx.index.sites.get(site).kind, SiteKind::ChapelSite(_)),
-                                    bird_large::Species::FrostWyvern => matches!(&ctx.index.sites.get(site).kind, SiteKind::Adlet(_)),
-                                    bird_large::Species::WealdWyvern => matches!(&ctx.index.sites.get(site).kind, SiteKind::GiantTree(_)),
-                                    _ => matches!(&ctx.index.sites.get(site).kind, SiteKind::Dungeon(_)),
+                                    bird_large::Species::Phoenix => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::Terracotta(_)
+                                    | SiteKind::Haniwa(_)
+                                    | SiteKind::Dungeon(_)
+                                    | SiteKind::Adlet(_)
+                                    | SiteKind::DwarvenMine(_)
+                                    | SiteKind::ChapelSite(_)
+                                    | SiteKind::Cultist(_)
+                                    | SiteKind::Gnarling(_)
+                                    | SiteKind::Sahagin(_)),
+                                    bird_large::Species::Cockatrice => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::Dungeon(_)
+                                    | SiteKind::GiantTree(_)),
+                                    bird_large::Species::Roc => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::Haniwa(_)
+                                    | SiteKind::Cultist(_)),
+                                    bird_large::Species::FlameWyvern => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::DwarvenMine(_)
+                                    | SiteKind::Terracotta(_)),
+                                    bird_large::Species::CloudWyvern => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::ChapelSite(_)
+                                    | SiteKind::Sahagin(_)),
+                                    bird_large::Species::FrostWyvern => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::Adlet(_)
+                                    | SiteKind::Dungeon(_)),
+                                    bird_large::Species::SeaWyvern => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::ChapelSite(_)
+                                    | SiteKind::Sahagin(_)),
+                                    bird_large::Species::WealdWyvern => matches!(&ctx.index.sites.get(site).kind,
+                                    SiteKind::GiantTree(_)
+                                    | SiteKind::Gnarling(_)),
                                 },
-                                _ => matches!(&ctx.index.sites.get(site).kind, SiteKind::Dungeon(_)),
+                                _ => matches!(&ctx.index.sites.get(site).kind, SiteKind::GiantTree(_)),
                             }
                         })
                     })

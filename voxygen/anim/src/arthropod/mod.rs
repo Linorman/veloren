@@ -1,19 +1,18 @@
-pub mod combomelee;
-pub mod dash;
+pub mod basic;
 pub mod idle;
 pub mod jump;
-pub mod leapmelee;
-pub mod leapshockwave;
+pub mod multi;
 pub mod run;
-pub mod shoot;
 pub mod stunned;
-pub mod summon;
 
 // Reexports
 pub use self::{
-    combomelee::ComboAnimation, dash::DashAnimation, idle::IdleAnimation, jump::JumpAnimation,
-    leapmelee::LeapMeleeAnimation, leapshockwave::LeapShockAnimation, run::RunAnimation,
-    shoot::ShootAnimation, stunned::StunnedAnimation, summon::SummonAnimation,
+    basic::{BasicAction, BasicActionDependency},
+    idle::IdleAnimation,
+    jump::JumpAnimation,
+    multi::{MultiAction, MultiActionDependency},
+    run::RunAnimation,
+    stunned::StunnedAnimation,
 };
 
 use super::{make_bone, vek::*, FigureBoneData, Offsets, Skeleton};
@@ -310,9 +309,9 @@ impl<'a> From<&'a Body> for SkeletonAttr {
                 (Blackwidow, _) => 1.0,
                 (Antlion, _) => 1.0,
                 (Hornbeetle, _) => 1.0,
-                (Leafbeetle, _) => 1.0,
+                (Leafbeetle, _) => 0.8,
                 (Stagbeetle, _) => 1.0,
-                (Weevil, _) => 1.0,
+                (Weevil, _) => 0.75,
                 (Cavespider, _) => 1.0,
                 (Moltencrawler, _) => 1.0,
                 (Mosscrawler, _) => 1.0,

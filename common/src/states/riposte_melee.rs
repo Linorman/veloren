@@ -18,6 +18,9 @@ pub struct StaticData {
     pub swing_duration: Duration,
     /// How long the state has until exiting
     pub recover_duration: Duration,
+    /// Base value that incoming damage is reduced by and converted to poise
+    /// damage
+    pub block_strength: f32,
     /// Used to construct the Melee attack
     pub melee_constructor: MeleeConstructor,
     /// What key is used to press ability
@@ -91,7 +94,11 @@ impl CharacterBehavior for Data {
                 if self.timer < self.static_data.recover_duration {
                     // Recovery
                     if let CharacterState::RiposteMelee(c) = &mut update.character {
-                        c.timer = tick_attack_or_default(data, self.timer, None);
+                        c.timer = tick_attack_or_default(
+                            data,
+                            self.timer,
+                            Some(data.stats.recovery_speed_modifier),
+                        );
                     }
                 } else {
                     // Done

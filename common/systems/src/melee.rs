@@ -2,11 +2,13 @@ use common::{
     combat::{self, AttackOptions, AttackSource, AttackerInfo, TargetInfo},
     comp::{
         agent::{Sound, SoundKind},
+        aura::EnteredAuras,
         melee::MultiTarget,
-        Alignment, Body, Buffs, CharacterState, Combo, Energy, Group, Health, Inventory, Melee,
-        Ori, Player, Pos, Scale, Stats,
+        Alignment, Body, Buffs, CharacterState, Combo, Energy, Group, Health, Inventory, Mass,
+        Melee, Ori, Player, Pos, Scale, Stats,
     },
-    event::{EventBus, ServerEvent},
+    event::{self, EmitExt, EventBus},
+    event_emitters,
     outcome::Outcome,
     resources::Time,
     terrain::TerrainGrid,
@@ -21,6 +23,21 @@ use specs::{
     shred, Entities, Join, LendJoin, Read, ReadExpect, ReadStorage, SystemData, WriteStorage,
 };
 use vek::*;
+
+event_emitters! {
+    struct ReadAttackEvents[AttackEmitters] {
+        health_change: event::HealthChangeEvent,
+        energy_change: event::EnergyChangeEvent,
+        poise_change: event::PoiseChangeEvent,
+        sound: event::SoundEvent,
+        mine_block: event::MineBlockEvent,
+        parry_hook: event::ParryHookEvent,
+        kockback: event::KnockbackEvent,
+        entity_attack_hook: event::EntityAttackedHookEvent,
+        combo_change: event::ComboChangeEvent,
+        buff: event::BuffEvent,
+    }
+}
 
 #[derive(SystemData)]
 pub struct ReadData<'a> {
@@ -40,10 +57,12 @@ pub struct ReadData<'a> {
     inventories: ReadStorage<'a, Inventory>,
     groups: ReadStorage<'a, Group>,
     char_states: ReadStorage<'a, CharacterState>,
-    server_bus: Read<'a, EventBus<ServerEvent>>,
     stats: ReadStorage<'a, Stats>,
     combos: ReadStorage<'a, Combo>,
     buffs: ReadStorage<'a, Buffs>,
+    entered_auras: ReadStorage<'a, EnteredAuras>,
+    events: ReadAttackEvents<'a>,
+    masses: ReadStorage<'a, Mass>,
 }
 
 /// This system is responsible for handling accepted inputs like moving or
@@ -63,7 +82,7 @@ impl<'a> System<'a> for Sys {
     const PHASE: Phase = Phase::Create;
 
     fn run(_job: &mut Job<Self>, (read_data, mut melee_attacks, outcomes): Self::SystemData) {
-        let mut server_emitter = read_data.server_bus.emitter();
+        let mut emitters = read_data.events.get_emitters();
         let mut outcomes_emitter = outcomes.emitter();
         let mut rng = rand::thread_rng();
 
@@ -82,7 +101,7 @@ impl<'a> System<'a> for Sys {
             if melee_attack.applied {
                 continue;
             }
-            server_emitter.emit(ServerEvent::Sound {
+            emitters.emit(event::SoundEvent {
                 sound: Sound::new(SoundKind::Melee, pos.0, 2.0, read_data.time.0),
             });
             melee_attack.applied = true;
@@ -103,7 +122,7 @@ impl<'a> System<'a> for Sys {
                 if eye_pos.distance_squared(block_pos.map(|e| e as f32 + 0.5))
                     < (rad + scale * melee_attack.range).powi(2)
                 {
-                    server_emitter.emit(ServerEvent::MineBlock {
+                    emitters.emit(event::MineBlockEvent {
                         entity: attacker,
                         pos: block_pos,
                         tool,
@@ -170,6 +189,8 @@ impl<'a> System<'a> for Sys {
                     && !is_blocked_by_wall(&read_data.terrain, attacker_cylinder, target_cylinder);
 
                 if hit {
+                    let allow_friendly_fire =
+                        combat::allow_friendly_fire(&read_data.entered_auras, attacker, target);
                     // See if entities are in the same group
                     let same_group = read_data
                         .groups
@@ -193,6 +214,7 @@ impl<'a> System<'a> for Sys {
                         combo: read_data.combos.get(attacker),
                         inventory: read_data.inventories.get(attacker),
                         stats: read_data.stats.get(attacker),
+                        mass: read_data.masses.get(attacker),
                     });
 
                     let target_ori = read_data.orientations.get(target);
@@ -208,12 +230,14 @@ impl<'a> System<'a> for Sys {
                         char_state: target_char_state,
                         energy: read_data.energies.get(target),
                         buffs: read_data.buffs.get(target),
+                        mass: read_data.masses.get(target),
                     };
 
                     // PvP check
-                    let may_harm = combat::may_harm(
+                    let permit_pvp = combat::permit_pvp(
                         &read_data.alignments,
                         &read_data.players,
+                        &read_data.entered_auras,
                         &read_data.id_maps,
                         Some(attacker),
                         target,
@@ -227,6 +251,8 @@ impl<'a> System<'a> for Sys {
                             .try_normalized()
                             .unwrap_or(ori.look_vec()),
                         target_ori,
+                        melee_attack.precision_flank_multipliers,
+                        melee_attack.precision_flank_invert,
                     );
 
                     let precision_from_poise = {
@@ -248,7 +274,8 @@ impl<'a> System<'a> for Sys {
 
                     let attack_options = AttackOptions {
                         target_dodging,
-                        may_harm,
+                        permit_pvp,
+                        allow_friendly_fire,
                         target_group,
                         precision_mult,
                     };
@@ -270,7 +297,7 @@ impl<'a> System<'a> for Sys {
                             strength,
                             AttackSource::Melee,
                             *read_data.time,
-                            |e| server_emitter.emit(e),
+                            &mut emitters,
                             |o| outcomes_emitter.emit(o),
                             &mut rng,
                             offset as u64,

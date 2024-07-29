@@ -28,18 +28,17 @@ use common::{
             item::{
                 item_key::ItemKey,
                 tool::{AbilityContext, ToolKind},
-                ItemKind, MaterialStatManifest,
+                ItemI18n, ItemKind, MaterialStatManifest,
             },
             slot::EquipSlot,
         },
         skills::{
-            self, AxeSkill, BowSkill, ClimbSkill, GeneralSkill, HammerSkill, MiningSkill,
-            RollSkill, SceptreSkill, Skill, StaffSkill, SwimSkill, SwordSkill, SKILL_MODIFIERS,
+            self, AxeSkill, BowSkill, ClimbSkill, HammerSkill, MiningSkill, SceptreSkill, Skill,
+            StaffSkill, SwimSkill, SwordSkill, SKILL_MODIFIERS,
         },
         skillset::{SkillGroupKind, SkillSet},
-        Body, Energy, Health, Inventory, Poise,
+        Body, CharacterState, Energy, Health, Inventory, Poise, Stats,
     },
-    consts::{ENERGY_PER_LEVEL, HP_PER_LEVEL},
 };
 use conrod_core::{
     color, image,
@@ -87,23 +86,7 @@ widget_ids! {
         skill_lock_imgs[],
         sword_bg,
         axe_bg,
-        hammer_render,
-        skill_hammer_combo_0,
-        skill_hammer_combo_1,
-        skill_hammer_combo_2,
-        skill_hammer_combo_3,
-        skill_hammer_combo_4,
-        skill_hammer_charged_0,
-        skill_hammer_charged_1,
-        skill_hammer_charged_2,
-        skill_hammer_charged_3,
-        skill_hammer_charged_4,
-        skill_hammer_leap_0,
-        skill_hammer_leap_1,
-        skill_hammer_leap_2,
-        skill_hammer_leap_3,
-        skill_hammer_leap_4,
-        skill_hammer_leap_5,
+        hammer_bg,
         bow_render,
         skill_bow_charged_0,
         skill_bow_charged_1,
@@ -201,6 +184,8 @@ widget_ids! {
         // Stats
         stat_names[],
         stat_values[],
+        // Recipes
+        recipe_groups[],
     }
 }
 
@@ -212,6 +197,7 @@ pub struct Diary<'a> {
     skill_set: &'a SkillSet,
     active_abilities: &'a ActiveAbilities,
     inventory: &'a Inventory,
+    char_state: &'a CharacterState,
     health: &'a Health,
     energy: &'a Energy,
     poise: &'a Poise,
@@ -221,11 +207,13 @@ pub struct Diary<'a> {
     item_imgs: &'a ItemImgs,
     fonts: &'a Fonts,
     localized_strings: &'a Localization,
+    item_i18n: &'a ItemI18n,
     rot_imgs: &'a ImgsRot,
     tooltip_manager: &'a mut TooltipManager,
     slot_manager: &'a mut SlotManager,
     pulse: f32,
     context: &'a AbilityContext,
+    stats: Option<&'a Stats>,
 
     #[conrod(common_builder)]
     common: widget::CommonBuilder,
@@ -258,6 +246,7 @@ impl<'a> Diary<'a> {
         skill_set: &'a SkillSet,
         active_abilities: &'a ActiveAbilities,
         inventory: &'a Inventory,
+        char_state: &'a CharacterState,
         health: &'a Health,
         energy: &'a Energy,
         poise: &'a Poise,
@@ -267,11 +256,13 @@ impl<'a> Diary<'a> {
         item_imgs: &'a ItemImgs,
         fonts: &'a Fonts,
         localized_strings: &'a Localization,
+        item_i18n: &'a ItemI18n,
         rot_imgs: &'a ImgsRot,
         tooltip_manager: &'a mut TooltipManager,
         slot_manager: &'a mut SlotManager,
         pulse: f32,
         context: &'a AbilityContext,
+        stats: Option<&'a Stats>,
     ) -> Self {
         Self {
             show,
@@ -280,6 +271,7 @@ impl<'a> Diary<'a> {
             skill_set,
             active_abilities,
             inventory,
+            char_state,
             health,
             energy,
             poise,
@@ -289,11 +281,13 @@ impl<'a> Diary<'a> {
             item_imgs,
             fonts,
             localized_strings,
+            item_i18n,
             rot_imgs,
             tooltip_manager,
             slot_manager,
             pulse,
             context,
+            stats,
             common: widget::CommonBuilder::default(),
             created_btns_top_l: 0,
             created_btns_top_r: 0,
@@ -319,7 +313,7 @@ const TREES: [&str; 8] = [
 
 // Possible future sections: Bestiary ("Pokedex" of fought enemies), Weapon and
 // armour catalogue, Achievements...
-const SECTIONS: [&str; 3] = ["Skill-Trees", "Abilities", "Stats"];
+const SECTIONS: [&str; 4] = ["Skill-Trees", "Abilities", "Stats", "Recipes"];
 
 pub enum Event {
     Close,
@@ -334,11 +328,13 @@ pub enum DiarySection {
     SkillTrees,
     AbilitySelection,
     Stats,
+    Recipes,
 }
 
 pub struct DiaryState {
     ids: Ids,
     ability_page: usize,
+    recipe_page: usize,
 }
 
 impl<'a> Widget for Diary<'a> {
@@ -350,6 +346,7 @@ impl<'a> Widget for Diary<'a> {
         DiaryState {
             ids: Ids::new(id_gen),
             ability_page: 0,
+            recipe_page: 0,
         }
     }
 
@@ -448,20 +445,24 @@ impl<'a> Widget for Diary<'a> {
                     continue;
                 },
             };
-            // Section Icons
-            let section_desc = match section_name {
-                "Abilities" => "List of your currently available abilities.",
-                "Skill-Trees" => "",
-                "Stats" => "",
-                _ => "",
+
+            let section_name_key = match section {
+                DiarySection::SkillTrees => "hud-diary-sections-skill_trees-title",
+                DiarySection::AbilitySelection => "hud-diary-sections-abilities-title",
+                DiarySection::Stats => "hud-diary-sections-stats-title",
+                DiarySection::Recipes => "hud-diary-sections-recipes-title",
             };
+
+            let section_name = self.localized_strings.get_msg(section_name_key);
+
             let btn_img = {
-                let img = match section_name {
-                    "Abilities" => self.imgs.spellbook_ico,
-                    "Skill-Trees" => self.imgs.skilltree_ico,
-                    "Stats" => self.imgs.stats_ico,
-                    _ => self.imgs.nothing,
+                let img = match section {
+                    DiarySection::AbilitySelection => self.imgs.spellbook_ico,
+                    DiarySection::SkillTrees => self.imgs.skilltree_ico,
+                    DiarySection::Stats => self.imgs.stats_ico,
+                    DiarySection::Recipes => self.imgs.crafting_icon,
                 };
+
                 if i == 0 {
                     Image::new(img).top_left_with_margins_on(state.ids.content_align, 0.0, -50.0)
                 } else {
@@ -494,8 +495,8 @@ impl<'a> Widget for Diary<'a> {
                 .middle_of(state.ids.section_imgs[i])
                 .with_tooltip(
                     self.tooltip_manager,
-                    section_name,
-                    section_desc,
+                    &section_name,
+                    "",
                     &diary_tooltip,
                     TEXT_COLOR,
                 )
@@ -536,20 +537,34 @@ impl<'a> Widget for Diary<'a> {
                         },
                     };
 
+                    let skilltree_name_key = match skill_group {
+                        SkillGroupKind::General => "hud-skill_tree-general",
+                        SkillGroupKind::Weapon(ToolKind::Sword) => "hud-skill_tree-sword",
+                        SkillGroupKind::Weapon(ToolKind::Axe) => "hud-skill_tree-axe",
+                        SkillGroupKind::Weapon(ToolKind::Hammer) => "hud-skill_tree-hammer",
+                        SkillGroupKind::Weapon(ToolKind::Bow) => "hud-skill_tree-bow",
+                        SkillGroupKind::Weapon(ToolKind::Staff) => "hud-skill_tree-staff",
+                        SkillGroupKind::Weapon(ToolKind::Sceptre) => "hud-skill_tree-sceptre",
+                        SkillGroupKind::Weapon(ToolKind::Pick) => "hud-skill_tree-mining",
+                        _ => "",
+                    };
+
+                    let skilltree_name = self.localized_strings.get_msg(skilltree_name_key);
+
                     // Check if we have this skill tree unlocked
                     let locked = !self.skill_set.skill_group_accessible(skill_group);
 
                     // Weapon button image
                     let btn_img = {
-                        let img = match skilltree_name {
-                            "General Combat" => self.imgs.swords_crossed,
-                            "Sword" => self.imgs.sword,
-                            "Axe" => self.imgs.axe,
-                            "Hammer" => self.imgs.hammer,
-                            "Bow" => self.imgs.bow,
-                            "Fire Staff" => self.imgs.staff,
-                            "Sceptre" => self.imgs.sceptre,
-                            "Mining" => self.imgs.mining,
+                        let img = match skill_group {
+                            SkillGroupKind::General => self.imgs.swords_crossed,
+                            SkillGroupKind::Weapon(ToolKind::Sword) => self.imgs.sword,
+                            SkillGroupKind::Weapon(ToolKind::Axe) => self.imgs.axe,
+                            SkillGroupKind::Weapon(ToolKind::Hammer) => self.imgs.hammer,
+                            SkillGroupKind::Weapon(ToolKind::Bow) => self.imgs.bow,
+                            SkillGroupKind::Weapon(ToolKind::Staff) => self.imgs.staff,
+                            SkillGroupKind::Weapon(ToolKind::Sceptre) => self.imgs.sceptre,
+                            SkillGroupKind::Weapon(ToolKind::Pick) => self.imgs.mining,
                             _ => self.imgs.nothing,
                         };
 
@@ -578,6 +593,7 @@ impl<'a> Widget for Diary<'a> {
                     // Weapon icons
                     let have_points = {
                         let available = self.skill_set.available_sp(skill_group);
+
                         let earned = self.skill_set.earned_sp(skill_group);
                         let total_cost = skill_group.total_skill_point_cost();
 
@@ -622,7 +638,7 @@ impl<'a> Widget for Diary<'a> {
                         .image_color(color)
                         .with_tooltip(
                             self.tooltip_manager,
-                            skilltree_name,
+                            &skilltree_name,
                             &tooltip_txt,
                             &diary_tooltip,
                             TEXT_COLOR,
@@ -838,6 +854,8 @@ impl<'a> Widget for Diary<'a> {
                         self.inventory,
                         self.skill_set,
                         self.context,
+                        Some(self.char_state),
+                        self.stats,
                     ),
                     image_source: self.imgs,
                     slot_manager: Some(self.slot_manager),
@@ -851,8 +869,14 @@ impl<'a> Widget for Diary<'a> {
                             AbilityInput::Auxiliary(i),
                             Some(self.inventory),
                             Some(self.skill_set),
+                            self.stats,
                         )
-                        .ability_id(Some(self.inventory), Some(self.skill_set), self.context);
+                        .ability_id(
+                            Some(self.char_state),
+                            Some(self.inventory),
+                            Some(self.skill_set),
+                            self.context,
+                        );
                     let (ability_title, ability_desc) = if let Some(ability_id) = ability_id {
                         util::ability_description(ability_id, self.localized_strings)
                     } else {
@@ -912,59 +936,23 @@ impl<'a> Widget for Diary<'a> {
                         .set(state.ids.active_abilities_keys[i], ui);
                 }
 
-                let same_weap_kinds = self
-                    .inventory
-                    .equipped(EquipSlot::ActiveMainhand)
-                    .zip(self.inventory.equipped(EquipSlot::ActiveOffhand))
-                    .map_or(false, |(a, b)| {
-                        if let (ItemKind::Tool(tool_a), ItemKind::Tool(tool_b)) =
-                            (&*a.kind(), &*b.kind())
-                        {
-                            (a.ability_spec(), tool_a.kind) == (b.ability_spec(), tool_b.kind)
-                        } else {
-                            false
-                        }
-                    });
-
-                let main_weap_abilities = ActiveAbilities::iter_available_abilities(
+                let abilities: Vec<_> = ActiveAbilities::all_available_abilities(
                     Some(self.inventory),
                     Some(self.skill_set),
-                    EquipSlot::ActiveMainhand,
                 )
-                .map(AuxiliaryAbility::MainWeapon)
+                .into_iter()
                 .map(|a| {
                     (
                         Ability::from(a).ability_id(
+                            Some(self.char_state),
                             Some(self.inventory),
                             Some(self.skill_set),
                             self.context,
                         ),
                         a,
                     )
-                });
-                let off_weap_abilities = ActiveAbilities::iter_available_abilities(
-                    Some(self.inventory),
-                    Some(self.skill_set),
-                    EquipSlot::ActiveOffhand,
-                )
-                .map(AuxiliaryAbility::OffWeapon)
-                .map(|a| {
-                    (
-                        Ability::from(a).ability_id(
-                            Some(self.inventory),
-                            Some(self.skill_set),
-                            self.context,
-                        ),
-                        a,
-                    )
-                });
-
-                let abilities: Vec<_> = if same_weap_kinds {
-                    // When the weapons have the same ability kind take only the main weapons,
-                    main_weap_abilities.collect()
-                } else {
-                    main_weap_abilities.chain(off_weap_abilities).collect()
-                };
+                })
+                .collect();
 
                 const ABILITIES_PER_PAGE: usize = 12;
 
@@ -1065,11 +1053,27 @@ impl<'a> Widget for Diary<'a> {
                         self.inventory,
                         self.skill_set,
                         self.context,
+                        Some(self.char_state),
+                        self.stats,
                     ),
                     image_source: self.imgs,
                     slot_manager: Some(self.slot_manager),
                     pulse: 0.0,
                 };
+
+                let same_weap_kinds = self
+                    .inventory
+                    .equipped(EquipSlot::ActiveMainhand)
+                    .zip(self.inventory.equipped(EquipSlot::ActiveOffhand))
+                    .map_or(false, |(a, b)| {
+                        if let (ItemKind::Tool(tool_a), ItemKind::Tool(tool_b)) =
+                            (&*a.kind(), &*b.kind())
+                        {
+                            (a.ability_spec(), tool_a.kind) == (b.ability_spec(), tool_b.kind)
+                        } else {
+                            false
+                        }
+                    });
 
                 for (id_index, (ability_id, ability)) in abilities
                     .iter()
@@ -1320,6 +1324,111 @@ impl<'a> Widget for Diary<'a> {
 
                 events
             },
+            DiarySection::Recipes => {
+                // Background Art
+                Image::new(self.imgs.book_bg)
+                    .w_h(299.0 * 4.0, 184.0 * 4.0)
+                    .mid_top_with_margin_on(state.ids.content_align, 4.0)
+                    .set(state.ids.spellbook_art, ui);
+
+                Rectangle::fill_with([299.0 * 2.0, 184.0 * 4.0], color::TRANSPARENT)
+                    .top_left_with_margins_on(state.ids.spellbook_art, 0.0, 0.0)
+                    .set(state.ids.sb_page_left_align, ui);
+                Rectangle::fill_with([299.0 * 2.0, 184.0 * 4.0], color::TRANSPARENT)
+                    .top_right_with_margins_on(state.ids.spellbook_art, 0.0, 0.0)
+                    .set(state.ids.sb_page_right_align, ui);
+
+                const RECIPES_PER_PAGE: usize = 36;
+
+                let page_index_max =
+                    self.inventory.recipe_groups_iter().len().saturating_sub(1) / RECIPES_PER_PAGE;
+
+                if state.recipe_page > page_index_max {
+                    state.update(|s| s.recipe_page = 0);
+                }
+
+                // Page button
+                // Left Arrow
+                let left_arrow = Button::image(if state.recipe_page > 0 {
+                    self.imgs.arrow_l
+                } else {
+                    self.imgs.arrow_l_inactive
+                })
+                .bottom_left_with_margins_on(state.ids.spellbook_art, -83.0, 10.0)
+                .w_h(48.0, 55.0);
+                // Grey out arrows when inactive
+                if state.recipe_page > 0 {
+                    if left_arrow
+                        .hover_image(self.imgs.arrow_l_click)
+                        .press_image(self.imgs.arrow_l)
+                        .set(state.ids.ability_page_left, ui)
+                        .was_clicked()
+                    {
+                        state.update(|s| s.recipe_page -= 1);
+                    }
+                } else {
+                    left_arrow.set(state.ids.ability_page_left, ui);
+                }
+                // Right Arrow
+                let right_arrow = Button::image(if state.recipe_page < page_index_max {
+                    self.imgs.arrow_r
+                } else {
+                    self.imgs.arrow_r_inactive
+                })
+                .bottom_right_with_margins_on(state.ids.spellbook_art, -83.0, 10.0)
+                .w_h(48.0, 55.0);
+                if state.recipe_page < page_index_max {
+                    // Only show right button if not on last page
+                    if right_arrow
+                        .hover_image(self.imgs.arrow_r_click)
+                        .press_image(self.imgs.arrow_r)
+                        .set(state.ids.ability_page_right, ui)
+                        .was_clicked()
+                    {
+                        state.update(|s| s.recipe_page += 1);
+                    };
+                } else {
+                    right_arrow.set(state.ids.ability_page_right, ui);
+                }
+
+                state.update(|s| {
+                    s.ids
+                        .recipe_groups
+                        .resize(RECIPES_PER_PAGE, &mut ui.widget_id_generator())
+                });
+
+                for (i, rg) in self
+                    .inventory
+                    .recipe_groups_iter()
+                    .skip(state.recipe_page * RECIPES_PER_PAGE)
+                    .take(RECIPES_PER_PAGE)
+                    .enumerate()
+                {
+                    let (title, _desc) =
+                        util::item_text(rg, self.localized_strings, self.item_i18n);
+
+                    let mut text = Text::new(&title)
+                        .font_id(self.fonts.cyri.conrod_id)
+                        .font_size(self.fonts.cyri.scale(29))
+                        .color(BLACK);
+
+                    if i == 0 {
+                        text =
+                            text.top_left_with_margins_on(state.ids.sb_page_left_align, 20.0, 20.0);
+                    } else if i == 18 {
+                        text = text.top_left_with_margins_on(
+                            state.ids.sb_page_right_align,
+                            20.0,
+                            20.0,
+                        );
+                    } else {
+                        text = text.down_from(state.ids.recipe_groups[i - 1], 10.0);
+                    }
+                    text.set(state.ids.recipe_groups[i], ui);
+                }
+
+                events
+            },
         }
     }
 }
@@ -1343,6 +1452,7 @@ fn section_from_str(string: &str) -> Option<DiarySection> {
         "Abilities" => Some(DiarySection::AbilitySelection),
         "Skill-Trees" => Some(DiarySection::SkillTrees),
         "Stats" => Some(DiarySection::Stats),
+        "Recipes" => Some(DiarySection::Recipes),
         _ => None,
     }
 }
@@ -1386,9 +1496,9 @@ impl<'a> Diary<'a> {
 
         // Number of skills per rectangle per weapon, start counting at 0
         // Maximum of 9 skills/8 indices
-        let skills_top_l = 2;
-        let skills_top_r = 6;
-        let skills_bot_l = 4;
+        let skills_top_l = 6;
+        let skills_top_r = 0;
+        let skills_bot_l = 0;
         let skills_bot_r = 5;
 
         self.setup_state_for_skill_icons(
@@ -1399,7 +1509,7 @@ impl<'a> Diary<'a> {
             skills_bot_l,
             skills_bot_r,
         );
-        use skills::{GeneralSkill::*, RollSkill::*};
+
         use SkillGroupKind::*;
         use ToolKind::*;
         // General Combat
@@ -1431,80 +1541,42 @@ impl<'a> Diary<'a> {
             //        5 1 6
             //        3 0 4
             //        8 2 7
-            SkillIcon::Unlockable {
-                skill: Skill::General(HealthIncrease),
-                image: self.imgs.health_plus_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_l[0], 3.0),
-                id: state.ids.skill_general_stat_0,
-            },
-            SkillIcon::Unlockable {
-                skill: Skill::General(EnergyIncrease),
-                image: self.imgs.energy_plus_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_l[1], 3.0),
-                id: state.ids.skill_general_stat_1,
-            },
-            // Top right skills
+            // Bottom left skills
             SkillIcon::Unlockable {
                 skill: Skill::UnlockGroup(Weapon(Sword)),
                 image: self.imgs.unlock_sword_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[0], 3.0),
+                position: MidTopWithMarginOn(state.ids.skills_top_l[0], 3.0),
                 id: state.ids.skill_general_tree_0,
             },
             SkillIcon::Unlockable {
                 skill: Skill::UnlockGroup(Weapon(Axe)),
                 image: self.imgs.unlock_axe_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[1], 3.0),
+                position: MidTopWithMarginOn(state.ids.skills_top_l[1], 3.0),
                 id: state.ids.skill_general_tree_1,
             },
             SkillIcon::Unlockable {
                 skill: Skill::UnlockGroup(Weapon(Hammer)),
                 image: self.imgs.unlock_hammer_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[2], 3.0),
+                position: MidTopWithMarginOn(state.ids.skills_top_l[2], 3.0),
                 id: state.ids.skill_general_tree_2,
             },
             SkillIcon::Unlockable {
                 skill: Skill::UnlockGroup(Weapon(Bow)),
                 image: self.imgs.unlock_bow_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[3], 3.0),
+                position: MidTopWithMarginOn(state.ids.skills_top_l[3], 3.0),
                 id: state.ids.skill_general_tree_3,
             },
             SkillIcon::Unlockable {
                 skill: Skill::UnlockGroup(Weapon(Staff)),
                 image: self.imgs.unlock_staff_skill0,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[4], 3.0),
+                position: MidTopWithMarginOn(state.ids.skills_top_l[4], 3.0),
                 id: state.ids.skill_general_tree_4,
             },
             SkillIcon::Unlockable {
                 skill: Skill::UnlockGroup(Weapon(Sceptre)),
                 image: self.imgs.unlock_sceptre_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[5], 3.0),
+                position: MidTopWithMarginOn(state.ids.skills_top_l[5], 3.0),
                 id: state.ids.skill_general_tree_5,
-            },
-            // Bottom left skills
-            SkillIcon::Descriptive {
-                title: "hud-skill-dodge_title",
-                desc: "hud-skill-dodge",
-                image: self.imgs.skill_dodge_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[0], 3.0),
-                id: state.ids.skill_general_roll_0,
-            },
-            SkillIcon::Unlockable {
-                skill: Skill::Roll(Cost),
-                image: self.imgs.utility_cost_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[1], 3.0),
-                id: state.ids.skill_general_roll_1,
-            },
-            SkillIcon::Unlockable {
-                skill: Skill::Roll(Strength),
-                image: self.imgs.utility_speed_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[2], 3.0),
-                id: state.ids.skill_general_roll_2,
-            },
-            SkillIcon::Unlockable {
-                skill: Skill::Roll(Duration),
-                image: self.imgs.utility_duration_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[3], 3.0),
-                id: state.ids.skill_general_roll_3,
             },
             // Bottom right skills
             SkillIcon::Descriptive {
@@ -1860,152 +1932,122 @@ impl<'a> Diary<'a> {
         ui: &mut UiCell,
         mut events: Vec<Event>,
     ) -> Vec<Event> {
-        // Title text
-        let tree_title = &self.localized_strings.get_msg("common-weapons-hammer");
-
-        Text::new(tree_title)
-            .mid_top_with_margin_on(state.ids.content_align, 2.0)
-            .font_id(self.fonts.cyri.conrod_id)
-            .font_size(self.fonts.cyri.scale(34))
-            .color(TEXT_COLOR)
-            .set(state.ids.tree_title_txt, ui);
-
-        // Number of skills per rectangle per weapon, start counting at 0
-        // Maximum of 9 skills/8 indices
-        let skills_top_l = 5;
-        let skills_top_r = 5;
-        let skills_bot_l = 6;
-        let skills_bot_r = 0;
-
-        self.setup_state_for_skill_icons(
-            state,
-            ui,
-            skills_top_l,
-            skills_top_r,
-            skills_bot_l,
-            skills_bot_r,
-        );
-
-        // Skill icons and buttons
-        use skills::HammerSkill::*;
         // Hammer
-        Image::new(animate_by_pulse(
-            &self
-                .item_imgs
-                .img_ids_or_not_found_img(ItemKey::Simple("example_hammer".to_string())),
-            self.pulse,
-        ))
-        .wh(ART_SIZE)
-        .middle_of(state.ids.content_align)
-        .color(Some(Color::Rgba(1.0, 1.0, 1.0, 1.0)))
-        .set(state.ids.hammer_render, ui);
-        use PositionSpecifier::MidTopWithMarginOn;
+        Image::new(self.imgs.hammer_bg)
+            .wh([924.0, 619.0])
+            .mid_top_with_margin_on(state.ids.content_align, 65.0)
+            .color(Some(Color::Rgba(1.0, 1.0, 1.0, 1.0)))
+            .set(state.ids.hammer_bg, ui);
+
+        use PositionSpecifier::TopLeftWithMarginsOn;
         let skill_buttons = &[
-            // Top Left skills
-            //        5 1 6
-            //        3 0 4
-            //        8 2 7
-            SkillIcon::Descriptive {
-                title: "hud-skill-hmr_single_strike_title",
-                desc: "hud-skill-hmr_single_strike",
-                image: self.imgs.twohhammer_m1,
-                position: MidTopWithMarginOn(state.ids.skills_top_l[0], 3.0),
-                id: state.ids.skill_hammer_combo_0,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::ScornfulSwipe),
+                ability_id: "common.abilities.hammer.scornful_swipe",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 455.0, 424.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(SsKnockback),
-                image: self.imgs.physical_knockback_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_l[1], 3.0),
-                id: state.ids.skill_hammer_combo_1,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Tremor),
+                ability_id: "common.abilities.hammer.tremor",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 398.0, 172.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(SsDamage),
-                image: self.imgs.physical_damage_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_l[2], 3.0),
-                id: state.ids.skill_hammer_combo_2,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::VigorousBash),
+                ability_id: "common.abilities.hammer.vigorous_bash",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 398.0, 272.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(SsSpeed),
-                image: self.imgs.physical_speed_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_l[3], 3.0),
-                id: state.ids.skill_hammer_combo_3,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Retaliate),
+                ability_id: "common.abilities.hammer.retaliate",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 284.0, 122.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(SsRegen),
-                image: self.imgs.physical_energy_regen_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_l[4], 3.0),
-                id: state.ids.skill_hammer_combo_4,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::SpineCracker),
+                ability_id: "common.abilities.hammer.spine_cracker",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 284.0, 222.0),
             },
-            // Top right skills
-            SkillIcon::Descriptive {
-                title: "hud-skill-hmr_charged_melee_title",
-                desc: "hud-skill-hmr_charged_melee",
-                image: self.imgs.hammergolf,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[0], 3.0),
-                id: state.ids.skill_hammer_charged_0,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Breach),
+                ability_id: "common.abilities.hammer.breach",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 284.0, 322.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(CKnockback),
-                image: self.imgs.physical_knockback_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[1], 3.0),
-                id: state.ids.skill_hammer_charged_1,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::IronTempest),
+                ability_id: "common.abilities.hammer.iron_tempest",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 170.0, 172.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(CDamage),
-                image: self.imgs.physical_damage_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[2], 3.0),
-                id: state.ids.skill_hammer_charged_2,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Upheaval),
+                ability_id: "common.abilities.hammer.upheaval",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 170.0, 272.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(CDrain),
-                image: self.imgs.physical_energy_drain_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[3], 3.0),
-                id: state.ids.skill_hammer_charged_3,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Thunderclap),
+                ability_id: "common.abilities.hammer.thunderclap",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 56.0, 172.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(CSpeed),
-                image: self.imgs.physical_amount_skill,
-                position: MidTopWithMarginOn(state.ids.skills_top_r[4], 3.0),
-                id: state.ids.skill_hammer_charged_4,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::SeismicShock),
+                ability_id: "common.abilities.hammer.seismic_shock",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 56.0, 272.0),
             },
-            // Bottom left skills
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(UnlockLeap),
-                image: self.imgs.hammerleap,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[0], 3.0),
-                id: state.ids.skill_hammer_leap_0,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::HeavyWhorl),
+                ability_id: "common.abilities.hammer.heavy_whorl",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 398.0, 576.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(LDamage),
-                image: self.imgs.physical_damage_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[1], 3.0),
-                id: state.ids.skill_hammer_leap_1,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Intercept),
+                ability_id: "common.abilities.hammer.intercept",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 398.0, 676.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(LKnockback),
-                image: self.imgs.physical_knockback_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[2], 3.0),
-                id: state.ids.skill_hammer_leap_2,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::PileDriver),
+                ability_id: "common.abilities.hammer.pile_driver",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 284.0, 526.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(LCost),
-                image: self.imgs.physical_cost_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[3], 3.0),
-                id: state.ids.skill_hammer_leap_3,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::LungPummel),
+                ability_id: "common.abilities.hammer.lung_pummel",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 284.0, 626.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(LDistance),
-                image: self.imgs.physical_distance_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[4], 3.0),
-                id: state.ids.skill_hammer_leap_4,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::HelmCrusher),
+                ability_id: "common.abilities.hammer.helm_crusher",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 284.0, 726.0),
             },
-            SkillIcon::Unlockable {
-                skill: Skill::Hammer(LRange),
-                image: self.imgs.physical_radius_skill,
-                position: MidTopWithMarginOn(state.ids.skills_bot_l[5], 3.0),
-                id: state.ids.skill_hammer_leap_5,
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Rampart),
+                ability_id: "common.abilities.hammer.rampart",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 170.0, 576.0),
+            },
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Tenacity),
+                ability_id: "common.abilities.hammer.tenacity",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 170.0, 676.0),
+            },
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Earthshaker),
+                ability_id: "common.abilities.hammer.earthshaker",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 56.0, 576.0),
+            },
+            SkillIcon::Ability {
+                skill: Skill::Hammer(HammerSkill::Judgement),
+                ability_id: "common.abilities.hammer.judgement",
+                position: TopLeftWithMarginsOn(state.ids.hammer_bg, 56.0, 676.0),
             },
         ];
+
+        state.update(|s| {
+            s.ids
+                .skills
+                .resize(skill_buttons.len(), &mut ui.widget_id_generator())
+        });
+        state.update(|s| {
+            s.ids
+                .skill_lock_imgs
+                .resize(skill_buttons.len(), &mut ui.widget_id_generator())
+        });
 
         self.handle_skill_buttons(skill_buttons, ui, &mut events, diary_tooltip, state);
         events
@@ -2861,35 +2903,17 @@ impl<'a> Diary<'a> {
 fn skill_strings(skill: Skill) -> SkillStrings<'static> {
     match skill {
         // general tree
-        Skill::General(s) => general_skill_strings(s),
         Skill::UnlockGroup(s) => unlock_skill_strings(s),
         // weapon trees
-        Skill::Hammer(s) => hammer_skill_strings(s),
         Skill::Bow(s) => bow_skill_strings(s),
         Skill::Staff(s) => staff_skill_strings(s),
         Skill::Sceptre(s) => sceptre_skill_strings(s),
         // movement trees
-        Skill::Roll(s) => roll_skill_strings(s),
         Skill::Climb(s) => climb_skill_strings(s),
         Skill::Swim(s) => swim_skill_strings(s),
         // mining
         Skill::Pick(s) => mining_skill_strings(s),
         _ => SkillStrings::plain("", ""),
-    }
-}
-
-fn general_skill_strings(skill: GeneralSkill) -> SkillStrings<'static> {
-    match skill {
-        GeneralSkill::HealthIncrease => SkillStrings::with_const(
-            "hud-skill-inc_health_title",
-            "hud-skill-inc_health",
-            u32::from(HP_PER_LEVEL),
-        ),
-        GeneralSkill::EnergyIncrease => SkillStrings::with_const(
-            "hud-skill-inc_energy_title",
-            "hud-skill-inc_energy",
-            u32::from(ENERGY_PER_LEVEL),
-        ),
     }
 }
 
@@ -2930,81 +2954,6 @@ fn unlock_skill_strings(group: SkillGroupKind) -> SkillStrings<'static> {
             tracing::warn!("Requesting title for unlocking unexpected skill group");
             SkillStrings::Empty
         },
-    }
-}
-
-fn hammer_skill_strings(skill: HammerSkill) -> SkillStrings<'static> {
-    let modifiers = SKILL_MODIFIERS.hammer_tree;
-    // Single strike upgrades
-    match skill {
-        HammerSkill::SsKnockback => SkillStrings::with_mult(
-            "hud-skill-hmr_single_strike_knockback_title",
-            "hud-skill-hmr_single_strike_knockback",
-            modifiers.single_strike.knockback,
-        ),
-        HammerSkill::SsDamage => SkillStrings::plain(
-            "hud-skill-hmr_single_strike_damage_title",
-            "hud-skill-hmr_single_strike_damage",
-        ),
-        HammerSkill::SsSpeed => SkillStrings::plain(
-            "hud-skill-hmr_single_strike_speed_title",
-            "hud-skill-hmr_single_strike_speed",
-        ),
-        HammerSkill::SsRegen => SkillStrings::plain(
-            "hud-skill-hmr_single_strike_regen_title",
-            "hud-skill-hmr_single_strike_regen",
-        ),
-        // Charged melee upgrades
-        HammerSkill::CDamage => SkillStrings::with_mult(
-            "hud-skill-hmr_charged_melee_damage_title",
-            "hud-skill-hmr_charged_melee_damage",
-            modifiers.charged.scaled_damage,
-        ),
-        HammerSkill::CKnockback => SkillStrings::with_mult(
-            "hud-skill-hmr_charged_melee_knockback_title",
-            "hud-skill-hmr_charged_melee_knockback",
-            modifiers.charged.scaled_knockback,
-        ),
-        HammerSkill::CDrain => SkillStrings::with_mult(
-            "hud-skill-hmr_charged_melee_nrg_drain_title",
-            "hud-skill-hmr_charged_melee_nrg_drain",
-            modifiers.charged.energy_drain,
-        ),
-        HammerSkill::CSpeed => SkillStrings::with_mult(
-            "hud-skill-hmr_charged_rate_title",
-            "hud-skill-hmr_charged_rate",
-            modifiers.charged.charge_rate,
-        ),
-        // Leap upgrades
-        HammerSkill::UnlockLeap => SkillStrings::plain(
-            "hud-skill-hmr_unlock_leap_title",
-            "hud-skill-hmr_unlock_leap",
-        ),
-        HammerSkill::LDamage => SkillStrings::with_mult(
-            "hud-skill-hmr_leap_damage_title",
-            "hud-skill-hmr_leap_damage",
-            modifiers.leap.base_damage,
-        ),
-        HammerSkill::LCost => SkillStrings::with_mult(
-            "hud-skill-hmr_leap_cost_title",
-            "hud-skill-hmr_leap_cost",
-            modifiers.leap.energy_cost,
-        ),
-        HammerSkill::LDistance => SkillStrings::with_mult(
-            "hud-skill-hmr_leap_distance_title",
-            "hud-skill-hmr_leap_distance",
-            modifiers.leap.leap_strength,
-        ),
-        HammerSkill::LKnockback => SkillStrings::with_mult(
-            "hud-skill-hmr_leap_knockback_title",
-            "hud-skill-hmr_leap_knockback",
-            modifiers.leap.knockback,
-        ),
-        HammerSkill::LRange => SkillStrings::with_const_float(
-            "hud-skill-hmr_leap_radius_title",
-            "hud-skill-hmr_leap_radius",
-            modifiers.leap.range,
-        ),
     }
 }
 
@@ -3228,27 +3177,6 @@ fn sceptre_skill_strings(skill: SceptreSkill) -> SkillStrings<'static> {
     }
 }
 
-fn roll_skill_strings(skill: RollSkill) -> SkillStrings<'static> {
-    let modifiers = SKILL_MODIFIERS.general_tree.roll;
-    match skill {
-        RollSkill::Cost => SkillStrings::with_mult(
-            "hud-skill-roll_energy_title",
-            "hud-skill-roll_energy",
-            modifiers.energy_cost,
-        ),
-        RollSkill::Strength => SkillStrings::with_mult(
-            "hud-skill-roll_speed_title",
-            "hud-skill-roll_speed",
-            modifiers.strength,
-        ),
-        RollSkill::Duration => SkillStrings::with_mult(
-            "hud-skill-roll_dur_title",
-            "hud-skill-roll_dur",
-            modifiers.duration,
-        ),
-    }
-}
-
 fn climb_skill_strings(skill: ClimbSkill) -> SkillStrings<'static> {
     let modifiers = SKILL_MODIFIERS.general_tree.climb;
     match skill {
@@ -3309,11 +3237,6 @@ enum SkillStrings<'a> {
         desc: &'a str,
         constant: u32,
     },
-    WithConstFloat {
-        title: &'a str,
-        desc: &'a str,
-        constant: f32,
-    },
     WithMult {
         title: &'a str,
         desc: &'a str,
@@ -3327,14 +3250,6 @@ impl<'a> SkillStrings<'a> {
 
     fn with_const(title: &'a str, desc: &'a str, constant: u32) -> Self {
         Self::WithConst {
-            title,
-            desc,
-            constant,
-        }
-    }
-
-    fn with_const_float(title: &'a str, desc: &'a str, constant: f32) -> Self {
-        Self::WithConstFloat {
             title,
             desc,
             constant,
@@ -3367,20 +3282,6 @@ impl<'a> SkillStrings<'a> {
                 (title, desc)
             },
             Self::WithConst {
-                title,
-                desc,
-                constant,
-            } => {
-                let title = i18n.get_msg(title);
-                let args = i18n::fluent_args! {
-                    "boost" => constant,
-                    "SP" => sp(i18n, skill_set, skill),
-                };
-                let desc = i18n.get_msg_ctx(desc, &args);
-
-                (title, desc)
-            },
-            Self::WithConstFloat {
                 title,
                 desc,
                 constant,

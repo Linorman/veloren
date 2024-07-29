@@ -31,13 +31,13 @@ use common::{
         GroupManip, InputKind, InventoryAction, InventoryEvent, InventoryUpdateEvent,
         MapMarkerChange, PresenceKind, UtteranceKind,
     },
-    event::{EventBus, LocalEvent, UpdateCharacterMetadata},
+    event::{EventBus, LocalEvent, PluginHash, UpdateCharacterMetadata},
     grid::Grid,
     link::Is,
     lod,
     mounting::{Rider, VolumePos, VolumeRider},
     outcome::Outcome,
-    recipe::{ComponentRecipeBook, RecipeBook, RepairRecipeBook},
+    recipe::{ComponentRecipeBook, RecipeBookManifest, RepairRecipeBook},
     resources::{GameMode, PlayerEntity, Time, TimeOfDay},
     shared_server_config::ServerConstants,
     spiral::Spiral2d,
@@ -49,7 +49,7 @@ use common::{
     trade::{PendingTrade, SitePrices, TradeAction, TradeId, TradeResult},
     uid::{IdMaps, Uid},
     vol::RectVolSize,
-    weather::{Weather, WeatherGrid},
+    weather::{CompressedWeather, SharedWeatherGrid, Weather, WeatherGrid},
 };
 #[cfg(feature = "tracy")] use common_base::plot;
 use common_base::{prof_span, span};
@@ -64,18 +64,27 @@ use common_net::{
     },
     sync::WorldSyncExt,
 };
+#[cfg(feature = "plugins")]
+use common_state::plugin::PluginMgr;
 use common_state::State;
 use common_systems::add_local_systems;
 use comp::BuffKind;
 use hashbrown::{HashMap, HashSet};
+use hickory_resolver::{
+    config::{ResolverConfig, ResolverOpts},
+    AsyncResolver,
+};
 use image::DynamicImage;
 use network::{ConnectAddr, Network, Participant, Pid, Stream};
 use num::traits::FloatConst;
 use rayon::prelude::*;
+use rustls::client::danger::ServerCertVerified;
 use specs::Component;
 use std::{
     collections::{BTreeMap, VecDeque},
+    fmt::Debug,
     mem,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -90,7 +99,7 @@ const PING_ROLLING_AVERAGE_SECS: usize = 10;
 #[derive(Debug)]
 pub enum Event {
     Chat(comp::ChatMsg),
-    GroupInventoryUpdate(comp::Item, String, Uid),
+    GroupInventoryUpdate(comp::FrontendItem, Uid),
     InviteComplete {
         target: Uid,
         answer: InviteAnswer,
@@ -114,6 +123,7 @@ pub enum Event {
     MapMarker(comp::MapMarkerUpdate),
     StartSpectate(Vec3<f32>),
     SpectatePosition(Vec3<f32>),
+    PluginDataReceived(Vec<u8>),
 }
 
 #[derive(Debug)]
@@ -178,12 +188,32 @@ pub struct SiteInfoRich {
 }
 
 struct WeatherLerp {
-    old: (WeatherGrid, Instant),
-    new: (WeatherGrid, Instant),
+    old: (SharedWeatherGrid, Instant),
+    new: (SharedWeatherGrid, Instant),
+    old_local_wind: (Vec2<f32>, Instant),
+    new_local_wind: (Vec2<f32>, Instant),
+    local_wind: Vec2<f32>,
 }
 
 impl WeatherLerp {
-    fn weather_update(&mut self, weather: WeatherGrid) {
+    fn local_wind_update(&mut self, wind: Vec2<f32>) {
+        self.old_local_wind = mem::replace(&mut self.new_local_wind, (wind, Instant::now()));
+    }
+
+    fn update_local_wind(&mut self) {
+        // Assumes updates are regular
+        let t = (self.new_local_wind.1.elapsed().as_secs_f32()
+            / self
+                .new_local_wind
+                .1
+                .duration_since(self.old_local_wind.1)
+                .as_secs_f32())
+        .clamp(0.0, 1.0);
+
+        self.local_wind = Vec2::lerp_unclamped(self.old_local_wind.0, self.new_local_wind.0, t);
+    }
+
+    fn weather_update(&mut self, weather: SharedWeatherGrid) {
         self.old = mem::replace(&mut self.new, (weather, Instant::now()));
     }
 
@@ -191,13 +221,14 @@ impl WeatherLerp {
     // that updates come at regular intervals.
     fn update(&mut self, to_update: &mut WeatherGrid) {
         prof_span!("WeatherLerp::update");
+        self.update_local_wind();
         let old = &self.old.0;
         let new = &self.new.0;
         if new.size() == Vec2::zero() {
             return;
         }
         if to_update.size() != new.size() {
-            *to_update = new.clone();
+            *to_update = WeatherGrid::from(new);
         }
         if old.size() == new.size() {
             // Assumes updates are regular
@@ -209,7 +240,10 @@ impl WeatherLerp {
                 .iter_mut()
                 .zip(old.iter().zip(new.iter()))
                 .for_each(|((_, current), ((_, old), (_, new)))| {
-                    *current = Weather::lerp_unclamped(old, new, t);
+                    *current = CompressedWeather::lerp_unclamped(old, new, t);
+                    // `local_wind` is set for all weather cells on the client,
+                    // which will still be inaccurate outside the "local" area
+                    current.wind = self.local_wind;
                 });
         }
     }
@@ -217,9 +251,14 @@ impl WeatherLerp {
 
 impl Default for WeatherLerp {
     fn default() -> Self {
+        let old = Instant::now();
+        let new = Instant::now();
         Self {
-            old: (WeatherGrid::new(Vec2::zero()), Instant::now()),
-            new: (WeatherGrid::new(Vec2::zero()), Instant::now()),
+            old: (SharedWeatherGrid::new(Vec2::zero()), old),
+            new: (SharedWeatherGrid::new(Vec2::zero()), new),
+            old_local_wind: (Vec2::zero(), old),
+            new_local_wind: (Vec2::zero(), new),
+            local_wind: Vec2::zero(),
         }
     }
 }
@@ -239,7 +278,6 @@ pub struct Client {
     possible_starting_sites: Vec<SiteId>,
     pois: Vec<PoiInfo>,
     pub chat_mode: ChatMode,
-    recipe_book: RecipeBook,
     component_recipe_book: ComponentRecipeBook,
     repair_recipe_book: RepairRecipeBook,
     available_recipes: HashMap<String, Option<SpriteKind>>,
@@ -291,6 +329,10 @@ pub struct Client {
     dt_adjustment: f64,
 
     connected_server_constants: ServerConstants,
+    /// Requested but not yet received plugins
+    missing_plugins: HashSet<PluginHash>,
+    /// Locally cached plugins needed by the server
+    local_plugins: Vec<PathBuf>,
 }
 
 /// Holds data related to the current players characters, as well as some
@@ -299,6 +341,90 @@ pub struct Client {
 pub struct CharacterList {
     pub characters: Vec<CharacterItem>,
     pub loading: bool,
+}
+
+async fn connect_quic(
+    network: &Network,
+    hostname: String,
+    override_port: Option<u16>,
+    prefer_ipv6: bool,
+    validate_tls: bool,
+) -> Result<network::Participant, crate::error::Error> {
+    let config = if validate_tls {
+        quinn::ClientConfig::with_platform_verifier()
+    } else {
+        warn!(
+            "skipping validation of server identity. There is no guarantee that the server you're \
+             connected to is the one you expect to be connecting to."
+        );
+        #[derive(Debug)]
+        struct Verifier;
+        impl rustls::client::danger::ServerCertVerifier for Verifier {
+            fn verify_server_cert(
+                &self,
+                _end_entity: &rustls::pki_types::CertificateDer<'_>,
+                _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+                _server_name: &rustls::pki_types::ServerName<'_>,
+                _ocsp_response: &[u8],
+                _now: rustls::pki_types::UnixTime,
+            ) -> Result<ServerCertVerified, rustls::Error> {
+                Ok(ServerCertVerified::assertion())
+            }
+
+            fn verify_tls12_signature(
+                &self,
+                _message: &[u8],
+                _cert: &rustls::pki_types::CertificateDer<'_>,
+                _dss: &rustls::DigitallySignedStruct,
+            ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+            {
+                Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+            }
+
+            fn verify_tls13_signature(
+                &self,
+                _message: &[u8],
+                _cert: &rustls::pki_types::CertificateDer<'_>,
+                _dss: &rustls::DigitallySignedStruct,
+            ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+            {
+                Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+            }
+
+            fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+                vec![
+                    rustls::SignatureScheme::RSA_PKCS1_SHA1,
+                    rustls::SignatureScheme::ECDSA_SHA1_Legacy,
+                    rustls::SignatureScheme::RSA_PKCS1_SHA256,
+                    rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+                    rustls::SignatureScheme::RSA_PKCS1_SHA384,
+                    rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+                    rustls::SignatureScheme::RSA_PKCS1_SHA512,
+                    rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
+                    rustls::SignatureScheme::RSA_PSS_SHA256,
+                    rustls::SignatureScheme::RSA_PSS_SHA384,
+                    rustls::SignatureScheme::RSA_PSS_SHA512,
+                    rustls::SignatureScheme::ED25519,
+                    rustls::SignatureScheme::ED448,
+                ]
+            }
+        }
+
+        let mut cfg = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(Verifier))
+            .with_no_client_auth();
+        cfg.enable_early_data = true;
+
+        quinn::ClientConfig::new(Arc::new(
+            quinn::crypto::rustls::QuicClientConfig::try_from(cfg).unwrap(),
+        ))
+    };
+
+    addr::try_connect(network, &hostname, override_port, prefer_ipv6, |a| {
+        ConnectAddr::Quic(a, config.clone(), hostname.clone())
+    })
+    .await
 }
 
 impl Client {
@@ -313,28 +439,137 @@ impl Client {
         auth_trusted: impl FnMut(&str) -> bool,
         init_stage_update: &(dyn Fn(ClientInitStage) + Send + Sync),
         add_foreign_systems: impl Fn(&mut DispatcherBuilder) + Send + 'static,
+        config_dir: PathBuf,
     ) -> Result<Self, Error> {
         let network = Network::new(Pid::new(), &runtime);
 
         init_stage_update(ClientInitStage::ConnectionEstablish);
+
         let mut participant = match addr {
+            ConnectionArgs::Srv {
+                hostname,
+                prefer_ipv6,
+                validate_tls,
+                use_quic,
+            } => {
+                // Try to create a resolver backed by /etc/resolv.conf or the Windows Registry
+                // first. If that fails, create a resolver being hard-coded to
+                // Google's 8.8.8.8 public resolver.
+                let resolver = AsyncResolver::tokio_from_system_conf().unwrap_or_else(|error| {
+                    error!("Failed to create DNS resolver using system configuration: {error:?}");
+                    warn!("Falling back to a default configured resolver.");
+                    AsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
+                });
+
+                let quic_service_host = format!("_veloren._udp.{hostname}");
+                let quic_lookup_future = resolver.srv_lookup(quic_service_host);
+                let tcp_service_host = format!("_veloren._tcp.{hostname}");
+                let tcp_lookup_future = resolver.srv_lookup(tcp_service_host);
+                let (quic_rr, tcp_rr) = tokio::join!(quic_lookup_future, tcp_lookup_future);
+
+                #[derive(Eq, PartialEq)]
+                enum ConnMode {
+                    Quic,
+                    Tcp,
+                }
+
+                // Push the results of both futures into `srv_rr`. This uses map_or_else purely
+                // for side effects.
+                let mut srv_rr = Vec::new();
+                let () = quic_rr.map_or_else(
+                    |error| {
+                        warn!("QUIC SRV lookup failed: {error:?}");
+                    },
+                    |srv_lookup| {
+                        srv_rr.extend(srv_lookup.iter().cloned().map(|srv| (ConnMode::Quic, srv)))
+                    },
+                );
+                let () = tcp_rr.map_or_else(
+                    |error| {
+                        warn!("TCP SRV lookup failed: {error:?}");
+                    },
+                    |srv_lookup| {
+                        srv_rr.extend(srv_lookup.iter().cloned().map(|srv| (ConnMode::Tcp, srv)))
+                    },
+                );
+
+                // SRV records have a priority; lowest priority hosts MUST be contacted first.
+                let srv_rr_slice = srv_rr.as_mut_slice();
+                srv_rr_slice.sort_by_key(|(_, srv)| srv.priority());
+
+                let mut iter = srv_rr_slice.iter();
+
+                // This loops exits as soon as the above iter over `srv_rr_slice` is exhausted
+                loop {
+                    if let Some((conn_mode, srv_rr)) = iter.next() {
+                        let hostname = format!("{}", srv_rr.target());
+                        let port = Some(srv_rr.port());
+                        let conn_result = match conn_mode {
+                            ConnMode::Quic => {
+                                connect_quic(&network, hostname, port, prefer_ipv6, validate_tls)
+                                    .await
+                            },
+                            ConnMode::Tcp => {
+                                addr::try_connect(
+                                    &network,
+                                    &hostname,
+                                    port,
+                                    prefer_ipv6,
+                                    ConnectAddr::Tcp,
+                                )
+                                .await
+                            },
+                        };
+                        match conn_result {
+                            Ok(c) => break c,
+                            Err(error) => {
+                                warn!("Failed to connect to host {}: {error:?}", srv_rr.target())
+                            },
+                        }
+                    } else {
+                        warn!(
+                            "No SRV hosts succeeded connection, falling back to direct connection"
+                        );
+                        // This case is also hit if no SRV host was returned from the query, so we
+                        // check for QUIC/TCP preference.
+                        let c = if use_quic {
+                            connect_quic(&network, hostname, None, prefer_ipv6, validate_tls)
+                                .await?
+                        } else {
+                            match addr::try_connect(
+                                &network,
+                                &hostname,
+                                None,
+                                prefer_ipv6,
+                                ConnectAddr::Tcp,
+                            )
+                            .await
+                            {
+                                Ok(c) => c,
+                                Err(error) => return Err(error),
+                            }
+                        };
+                        break c;
+                    }
+                }
+            },
             ConnectionArgs::Tcp {
                 hostname,
                 prefer_ipv6,
-            } => addr::try_connect(&network, &hostname, prefer_ipv6, ConnectAddr::Tcp).await?,
+            } => {
+                addr::try_connect(&network, &hostname, None, prefer_ipv6, ConnectAddr::Tcp).await?
+            },
             ConnectionArgs::Quic {
                 hostname,
                 prefer_ipv6,
+                validate_tls,
             } => {
                 warn!(
                     "QUIC is enabled. This is experimental and you won't be able to connect to \
                      TCP servers unless deactivated"
                 );
-                let config = quinn::ClientConfig::with_native_roots();
-                addr::try_connect(&network, &hostname, prefer_ipv6, |a| {
-                    ConnectAddr::Quic(a, config.clone(), hostname.clone())
-                })
-                .await?
+
+                connect_quic(&network, hostname, None, prefer_ipv6, validate_tls).await?
             },
             ConnectionArgs::Mpsc(id) => network.connect(ConnectAddr::Mpsc(id)).await?,
         };
@@ -393,6 +628,7 @@ impl Client {
             server_constants,
             repair_recipe_book,
             description,
+            active_plugins,
         } = loop {
             tokio::select! {
                 // Spawn in a blocking thread (leaving the network thread free).  This is mostly
@@ -426,7 +662,28 @@ impl Client {
                     add_local_systems(dispatch_builder);
                     add_foreign_systems(dispatch_builder);
                 },
+                #[cfg(feature = "plugins")]
+                common_state::plugin::PluginMgr::from_asset_or_default(),
             );
+            let mut missing_plugins: Vec<PluginHash> = Vec::new();
+            let mut local_plugins: Vec<PathBuf> = Vec::new();
+            #[cfg(feature = "plugins")]
+            {
+                let already_present = state.ecs().read_resource::<PluginMgr>().plugin_list();
+                for hash in active_plugins.iter() {
+                    if !already_present.contains(hash) {
+                        // look in config_dir first (cache)
+                        if let Ok(local_path) = common_state::plugin::find_cached(&config_dir, hash)
+                        {
+                            local_plugins.push(local_path);
+                        } else {
+                            //tracing::info!("cache not found {local_path:?}");
+                            tracing::info!("Server requires plugin {hash:x?}");
+                            missing_plugins.push(*hash);
+                        }
+                    }
+                }
+            }
             // Client-only components
             state.ecs_mut().register::<comp::Last<CharacterState>>();
             let entity = state.ecs_mut().apply_entity_package(entity_package);
@@ -434,6 +691,7 @@ impl Client {
             *state.ecs_mut().write_resource() = PlayerEntity(Some(entity));
             state.ecs_mut().insert(material_stats);
             state.ecs_mut().insert(ability_map);
+            state.ecs_mut().insert(recipe_book);
 
             let map_size = map_size_lg.chunks();
             let max_height = world_map.max_height;
@@ -695,11 +953,12 @@ impl Client {
                 world_map.sites,
                 world_map.possible_starting_sites,
                 world_map.pois,
-                recipe_book,
                 component_recipe_book,
                 repair_recipe_book,
                 max_group_size,
                 client_timeout,
+                missing_plugins,
+                local_plugins,
             ))
         });
 
@@ -712,17 +971,22 @@ impl Client {
             sites,
             possible_starting_sites,
             pois,
-            recipe_book,
             component_recipe_book,
             repair_recipe_book,
             max_group_size,
             client_timeout,
+            missing_plugins,
+            local_plugins,
         ) = loop {
             tokio::select! {
                 res = &mut task => break res.expect("Client thread should not panic")?,
                 _ = ping_interval.tick() => ping_stream.send(PingMsg::Ping)?,
             }
         };
+        let missing_plugins_set = missing_plugins.iter().cloned().collect();
+        if !missing_plugins.is_empty() {
+            stream.send(ClientGeneral::RequestPlugins(missing_plugins))?;
+        }
         ping_stream.send(PingMsg::Ping)?;
 
         debug!("Initial sync done");
@@ -753,7 +1017,6 @@ impl Client {
                 .collect(),
             possible_starting_sites,
             pois,
-            recipe_book,
             component_recipe_book,
             repair_recipe_book,
             available_recipes: HashMap::default(),
@@ -803,6 +1066,8 @@ impl Client {
             dt_adjustment: 1.0,
 
             connected_server_constants: server_constants,
+            missing_plugins: missing_plugins_set,
+            local_plugins,
         })
     }
 
@@ -936,7 +1201,8 @@ impl Client {
                     // Always possible
                     ClientGeneral::ChatMsg(_)
                     | ClientGeneral::Command(_, _)
-                    | ClientGeneral::Terminate => &mut self.general_stream,
+                    | ClientGeneral::Terminate
+                    | ClientGeneral::RequestPlugins(_) => &mut self.general_stream,
                 };
                 #[cfg(feature = "tracy")]
                 {
@@ -1093,6 +1359,13 @@ impl Client {
 
     pub fn swap_slots(&mut self, a: Slot, b: Slot) {
         match (a, b) {
+            (Slot::Overflow(o), Slot::Inventory(inv))
+            | (Slot::Inventory(inv), Slot::Overflow(o)) => {
+                self.send_msg(ClientGeneral::ControlEvent(ControlEvent::InventoryEvent(
+                    InventoryEvent::OverflowMove(o, inv),
+                )));
+            },
+            (Slot::Overflow(_), _) | (_, Slot::Overflow(_)) => {},
             (Slot::Equip(equip), slot) | (slot, Slot::Equip(equip)) => self.control_action(
                 ControlAction::InventoryAction(InventoryAction::Swap(equip, slot)),
             ),
@@ -1111,6 +1384,9 @@ impl Client {
             },
             Slot::Inventory(inv) => self.send_msg(ClientGeneral::ControlEvent(
                 ControlEvent::InventoryEvent(InventoryEvent::Drop(inv)),
+            )),
+            Slot::Overflow(o) => self.send_msg(ClientGeneral::ControlEvent(
+                ControlEvent::InventoryEvent(InventoryEvent::OverflowDrop(o)),
             )),
         }
     }
@@ -1139,6 +1415,7 @@ impl Client {
 
     pub fn split_swap_slots(&mut self, a: Slot, b: Slot) {
         match (a, b) {
+            (Slot::Overflow(_), _) | (_, Slot::Overflow(_)) => {},
             (Slot::Equip(equip), slot) | (slot, Slot::Equip(equip)) => self.control_action(
                 ControlAction::InventoryAction(InventoryAction::Swap(equip, slot)),
             ),
@@ -1158,6 +1435,9 @@ impl Client {
             Slot::Inventory(inv) => self.send_msg(ClientGeneral::ControlEvent(
                 ControlEvent::InventoryEvent(InventoryEvent::SplitDrop(inv)),
             )),
+            Slot::Overflow(o) => self.send_msg(ClientGeneral::ControlEvent(
+                ControlEvent::InventoryEvent(InventoryEvent::OverflowSplitDrop(o)),
+            )),
         }
     }
 
@@ -1173,6 +1453,16 @@ impl Client {
             self.send_msg(ClientGeneral::ControlEvent(ControlEvent::InventoryEvent(
                 InventoryEvent::Pickup(uid),
             )));
+        }
+    }
+
+    pub fn do_pet(&mut self, target_entity: EcsEntity) {
+        if self.is_dead() {
+            return;
+        }
+
+        if let Some(target_uid) = self.state.read_component_copied(target_entity) {
+            self.control_action(ControlAction::Pet { target_uid });
         }
     }
 
@@ -1199,8 +1489,6 @@ impl Client {
 
     pub fn world_data(&self) -> &WorldData { &self.world_data }
 
-    pub fn recipe_book(&self) -> &RecipeBook { &self.recipe_book }
-
     pub fn component_recipe_book(&self) -> &ComponentRecipeBook { &self.component_recipe_book }
 
     pub fn repair_recipe_book(&self) -> &RepairRecipeBook { &self.repair_recipe_book }
@@ -1215,21 +1503,6 @@ impl Client {
     /// entity does not have a position.
     pub fn set_lod_pos_fallback(&mut self, pos: Vec2<f32>) { self.lod_pos_fallback = Some(pos); }
 
-    /// Returns whether the specified recipe can be crafted and the sprite, if
-    /// any, that is required to do so.
-    pub fn can_craft_recipe(&self, recipe: &str, amount: u32) -> (bool, Option<SpriteKind>) {
-        self.recipe_book
-            .get(recipe)
-            .zip(self.inventories().get(self.entity()))
-            .map(|(recipe, inv)| {
-                (
-                    recipe.inventory_contains_ingredients(inv, amount).is_ok(),
-                    recipe.craft_sprite,
-                )
-            })
-            .unwrap_or((false, None))
-    }
-
     pub fn craft_recipe(
         &mut self,
         recipe: &str,
@@ -1237,8 +1510,20 @@ impl Client {
         craft_sprite: Option<(VolumePos, SpriteKind)>,
         amount: u32,
     ) -> bool {
-        let (can_craft, required_sprite) = self.can_craft_recipe(recipe, amount);
-        let has_sprite = required_sprite.map_or(true, |s| Some(s) == craft_sprite.map(|(_, s)| s));
+        let (can_craft, has_sprite) = if let Some(inventory) = self
+            .state
+            .ecs()
+            .read_storage::<comp::Inventory>()
+            .get(self.entity())
+        {
+            let rbm = self.state.ecs().read_resource::<RecipeBookManifest>();
+            let (can_craft, required_sprite) = inventory.can_craft_recipe(recipe, 1, &rbm);
+            let has_sprite =
+                required_sprite.map_or(true, |s| Some(s) == craft_sprite.map(|(_, s)| s));
+            (can_craft, has_sprite)
+        } else {
+            (false, false)
+        };
         if can_craft && has_sprite {
             self.send_msg(ClientGeneral::ControlEvent(ControlEvent::InventoryEvent(
                 InventoryEvent::CraftRecipe {
@@ -1367,6 +1652,7 @@ impl Client {
                 if let Some(item) = match item {
                     Slot::Equip(equip_slot) => inv.equipped(equip_slot),
                     Slot::Inventory(invslot) => inv.get(invslot),
+                    Slot::Overflow(_) => None,
                 } {
                     item.has_durability()
                 } else {
@@ -1386,19 +1672,22 @@ impl Client {
     }
 
     fn update_available_recipes(&mut self) {
-        self.available_recipes = self
-            .recipe_book
-            .iter()
-            .map(|(name, _)| name.clone())
-            .filter_map(|name| {
-                let (can_craft, required_sprite) = self.can_craft_recipe(&name, 1);
-                if can_craft {
-                    Some((name, required_sprite))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let rbm = self.state.ecs().read_resource::<RecipeBookManifest>();
+        let inventories = self.state.ecs().read_storage::<comp::Inventory>();
+        if let Some(inventory) = inventories.get(self.entity()) {
+            self.available_recipes = inventory
+                .recipes_iter()
+                .cloned()
+                .filter_map(|name| {
+                    let (can_craft, required_sprite) = inventory.can_craft_recipe(&name, 1, &rbm);
+                    if can_craft {
+                        Some((name, required_sprite))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+        }
     }
 
     /// Unstable, likely to be removed in a future release
@@ -1417,6 +1706,12 @@ impl Client {
 
     pub fn disable_lantern(&mut self) {
         self.send_msg(ClientGeneral::ControlEvent(ControlEvent::DisableLantern));
+    }
+
+    pub fn toggle_sprite_light(&mut self, pos: VolumePos, enable: bool) {
+        self.control_action(ControlAction::InventoryAction(
+            InventoryAction::ToggleSpriteLight(pos, enable),
+        ));
     }
 
     pub fn remove_buff(&mut self, buff_id: BuffKind) {
@@ -1710,7 +2005,11 @@ impl Client {
     /// Returns Weather::default if no player position exists.
     pub fn weather_at_player(&self) -> Weather {
         self.position()
-            .map(|wpos| self.state.weather_at(wpos.xy()))
+            .map(|p| {
+                let mut weather = self.state.weather_at(p.xy());
+                weather.wind = self.weather.local_wind;
+                weather
+            })
             .unwrap_or_default()
     }
 
@@ -1723,9 +2022,9 @@ impl Client {
         self.state.terrain().get_key_arc(chunk_pos).cloned()
     }
 
-    pub fn current<C: Component>(&self) -> Option<C>
+    pub fn current<C>(&self) -> Option<C>
     where
-        C: Clone,
+        C: Component + Clone,
     {
         self.state.read_storage::<C>().get(self.entity()).cloned()
     }
@@ -1931,12 +2230,7 @@ impl Client {
             &self.connected_server_constants,
             |_, _| {},
         );
-        // TODO: avoid emitting these in the first place
-        let _ = self
-            .state
-            .ecs()
-            .fetch::<EventBus<common::event::ServerEvent>>()
-            .recv_all();
+
         // TODO: avoid emitting these in the first place OR actually use outcomes
         // generated locally on the client (if they can be deduplicated from
         // ones that the server generates or if the client can reliably generate
@@ -2199,6 +2493,7 @@ impl Client {
                     player_info.character = match &player_info.character {
                         Some(character) => Some(msg::CharacterInfo {
                             name: character.name.to_string(),
+                            gender: character.gender,
                         }),
                         None => {
                             warn!(
@@ -2331,6 +2626,11 @@ impl Client {
             ServerGeneral::Notification(n) => {
                 frontend_events.push(Event::Notification(n));
             },
+            ServerGeneral::PluginData(d) => {
+                let plugin_len = d.len();
+                tracing::info!(?plugin_len, "plugin data");
+                frontend_events.push(Event::PluginDataReceived(d));
+            },
             _ => unreachable!("Not a general msg"),
         }
         Ok(())
@@ -2452,8 +2752,8 @@ impl Client {
                     kind,
                 });
             },
-            ServerGeneral::GroupInventoryUpdate(item, taker, uid) => {
-                frontend_events.push(Event::GroupInventoryUpdate(item, taker, uid));
+            ServerGeneral::GroupInventoryUpdate(item, uid) => {
+                frontend_events.push(Event::GroupInventoryUpdate(item, uid));
             },
             // Cleanup for when the client goes back to the `presence = None`
             ServerGeneral::ExitInGameSuccess => {
@@ -2533,8 +2833,14 @@ impl Client {
             ServerGeneral::WeatherUpdate(weather) => {
                 self.weather.weather_update(weather);
             },
+            ServerGeneral::LocalWindUpdate(wind) => {
+                self.weather.local_wind_update(wind);
+            },
             ServerGeneral::SpectatePosition(pos) => {
                 frontend_events.push(Event::SpectatePosition(pos));
+            },
+            ServerGeneral::UpdateRecipes => {
+                self.update_available_recipes();
             },
             _ => unreachable!("Not a in_game message"),
         }
@@ -2708,8 +3014,6 @@ impl Client {
             && self.state.get_program_time() - self.last_server_pong
                 > self.client_timeout.as_secs() as f64
         {
-            dbg!(self.state.get_program_time());
-            dbg!(self.last_server_pong);
             return Err(Error::ServerTimeout);
         }
 
@@ -2816,10 +3120,13 @@ impl Client {
     }
 
     /// Change player alias to "You" if client belongs to matching player
+    // TODO: move this to voxygen or i18n-helpers and properly localize there
+    // or what's better, just remove completely, it won't properly work with
+    // localization anyway.
     pub fn personalize_alias(&self, uid: Uid, alias: String) -> String {
         let client_uid = self.uid().expect("Client doesn't have a Uid!!!");
         if client_uid == uid {
-            "You".to_string() // TODO: Localize
+            "You".to_string()
         } else {
             alias
         }
@@ -2830,9 +3137,10 @@ impl Client {
     pub fn lookup_msg_context(&self, msg: &comp::ChatMsg) -> ChatTypeContext {
         let mut result = ChatTypeContext {
             you: self.uid().expect("Client doesn't have a Uid!!!"),
-            player_alias: HashMap::new(),
+            player_info: HashMap::new(),
             entity_name: HashMap::new(),
         };
+
         let name_of_uid = |uid| {
             let ecs = self.state.ecs();
             (
@@ -2843,53 +3151,52 @@ impl Client {
                 .find(|(_, u)| u == &uid)
                 .map(|(c, _)| c.name.clone())
         };
-        let mut alias_of_uid = |uid| match self.player_list.get(uid) {
-            Some(player_info) => {
-                result.player_alias.insert(*uid, player_info.clone());
-            },
-            None => {
-                result
-                    .entity_name
-                    .insert(*uid, name_of_uid(uid).unwrap_or_else(|| "<?>".to_string()));
-            },
+
+        let mut add_data_of = |uid| {
+            match self.player_list.get(uid) {
+                Some(player_info) => {
+                    result.player_info.insert(*uid, player_info.clone());
+                },
+                None => {
+                    result
+                        .entity_name
+                        .insert(*uid, name_of_uid(uid).unwrap_or_else(|| "<?>".to_string()));
+                },
+            };
         };
+
         match &msg.chat_type {
-            comp::ChatType::Online(uid) | comp::ChatType::Offline(uid) => {
-                alias_of_uid(uid);
-            },
-            comp::ChatType::CommandError => (),
-            comp::ChatType::CommandInfo => (),
-            comp::ChatType::FactionMeta(_) => (),
-            comp::ChatType::GroupMeta(_) => (),
+            comp::ChatType::Online(uid) | comp::ChatType::Offline(uid) => add_data_of(uid),
             comp::ChatType::Kill(kill_source, victim) => {
-                alias_of_uid(victim);
+                add_data_of(victim);
+
                 match kill_source {
                     KillSource::Player(attacker_uid, _) => {
-                        alias_of_uid(attacker_uid);
+                        add_data_of(attacker_uid);
                     },
-                    KillSource::NonPlayer(_, _) => (),
-                    KillSource::Environment(_) => (),
-                    KillSource::FallDamage => (),
-                    KillSource::Suicide => (),
-                    KillSource::NonExistent(_) => (),
-                    KillSource::Other => (),
+                    KillSource::NonPlayer(_, _)
+                    | KillSource::FallDamage
+                    | KillSource::Suicide
+                    | KillSource::NonExistent(_)
+                    | KillSource::Other => (),
                 };
             },
             comp::ChatType::Tell(from, to) | comp::ChatType::NpcTell(from, to) => {
-                alias_of_uid(from);
-                alias_of_uid(to);
+                add_data_of(from);
+                add_data_of(to);
             },
             comp::ChatType::Say(uid)
             | comp::ChatType::Region(uid)
             | comp::ChatType::World(uid)
-            | comp::ChatType::NpcSay(uid) => {
-                alias_of_uid(uid);
-            },
-            comp::ChatType::Group(uid, _) | comp::ChatType::Faction(uid, _) => {
-                alias_of_uid(uid);
-            },
-            comp::ChatType::Npc(uid) => alias_of_uid(uid),
-            comp::ChatType::Meta => (),
+            | comp::ChatType::NpcSay(uid)
+            | comp::ChatType::Group(uid, _)
+            | comp::ChatType::Faction(uid, _)
+            | comp::ChatType::Npc(uid) => add_data_of(uid),
+            comp::ChatType::CommandError
+            | comp::ChatType::CommandInfo
+            | comp::ChatType::FactionMeta(_)
+            | comp::ChatType::GroupMeta(_)
+            | comp::ChatType::Meta => (),
         };
         result
     }
@@ -2970,6 +3277,20 @@ impl Client {
 
         Ok(())
     }
+
+    /// another plugin data received, is this the last one
+    pub fn plugin_received(&mut self, hash: PluginHash) -> usize {
+        if !self.missing_plugins.remove(&hash) {
+            tracing::warn!(?hash, "received unrequested plugin");
+        }
+        self.missing_plugins.len()
+    }
+
+    /// true if missing_plugins is not empty
+    pub fn are_plugins_missing(&self) -> bool { !self.missing_plugins.is_empty() }
+
+    /// extract list of locally cached plugins to load
+    pub fn take_local_plugins(&mut self) -> Vec<PathBuf> { std::mem::take(&mut self.local_plugins) }
 }
 
 impl Drop for Client {
@@ -3010,6 +3331,7 @@ mod tests {
     /// CHANGING IT WILL BREAK 3rd PARTY APPLICATIONS (please extend) which
     /// needs to be informed (or fixed)
     ///  - torvus: https://gitlab.com/veloren/torvus
+    ///
     /// CONTACT @Core Developer BEFORE MERGING CHANGES TO THIS TEST
     fn constant_api_test() {
         use common::clock::Clock;
@@ -3035,6 +3357,7 @@ mod tests {
             |suggestion: &str| suggestion == auth_server,
             &|_| {},
             |_| {},
+            PathBuf::default(),
         ));
         let localisation = LocalizationHandle::load_expect("en");
 

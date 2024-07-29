@@ -19,12 +19,6 @@
             "common.items.npc_armor.quadruped_low.dagon",
         ): "common-items-npc_armor-quadruped_low-dagon",
         Simple(
-            "common.items.npc_armor.quadruped_low.generic",
-        ): "common-items-npc_armor-quadruped_low-generic",
-        Simple(
-            "common.items.npc_armor.quadruped_low.shell",
-        ): "common-items-npc_armor-quadruped_low-shell",
-        Simple(
             "common.items.npc_armor.bird_large.phoenix",
         ): "common-items-npc_armor-bird_large-phoenix",
         Simple(
@@ -36,6 +30,18 @@
         Simple(
             "common.items.npc_armor.golem.woodgolem",
         ): "common-items-npc_armor-golem-woodgolem",
+        Simple(
+            "common.items.npc_armor.golem.ancienteffigy",
+        ): "common-items-npc_armor-golem-ancienteffigy",
+        Simple(
+            "common.items.npc_armor.golem.gravewarden",
+        ): "common-items-npc_armor-golem-gravewarden",
+        Simple(
+            "common.items.npc_armor.golem.mogwai",
+        ): "common-items-npc_armor-golem-mogwai",
+        Simple(
+            "common.items.npc_armor.golem.irongolem",
+        ): "common-items-npc_armor-golem-irongolem",
         Simple(
             "common.items.npc_armor.biped_small.myrmidon.foot.hoplite",
         ): "common-items-npc_armor-biped_small-myrmidon-foot-hoplite",
@@ -316,20 +322,26 @@
             "common.items.npc_armor.biped_small.bushly.hand.bushly",
         ): "common-items-npc_armor-biped_small-bushly-hand-bushly",
         Simple(
-            "common.items.npc_armor.biped_small.clockwork.foot.clockwork",
-        ): "common-items-npc_armor-biped_small-clockwork-foot-clockwork",
+            "common.items.npc_armor.biped_small.treasure_egg.chest.treasure_egg",
+        ): "common-items-npc_armor-biped_small-treasure_egg-chest-treasure_egg",
         Simple(
-            "common.items.npc_armor.biped_small.clockwork.head.clockwork",
-        ): "common-items-npc_armor-biped_small-clockwork-head-clockwork",
+            "common.items.npc_armor.biped_small.treasure_egg.foot.treasure_egg",
+        ): "common-items-npc_armor-biped_small-treasure_egg-foot-treasure_egg",
         Simple(
-            "common.items.npc_armor.biped_small.clockwork.pants.clockwork",
-        ): "common-items-npc_armor-biped_small-clockwork-pants-clockwork",
+            "common.items.npc_armor.biped_small.iron_dwarf.foot.iron_dwarf",
+        ): "common-items-npc_armor-biped_small-iron_dwarf-foot-iron_dwarf",
         Simple(
-            "common.items.npc_armor.biped_small.clockwork.chest.clockwork",
-        ): "common-items-npc_armor-biped_small-clockwork-chest-clockwork",
+            "common.items.npc_armor.biped_small.iron_dwarf.head.iron_dwarf",
+        ): "common-items-npc_armor-biped_small-iron_dwarf-head-iron_dwarf",
         Simple(
-            "common.items.npc_armor.biped_small.clockwork.hand.clockwork",
-        ): "common-items-npc_armor-biped_small-clockwork-hand-clockwork",
+            "common.items.npc_armor.biped_small.iron_dwarf.pants.iron_dwarf",
+        ): "common-items-npc_armor-biped_small-iron_dwarf-pants-iron_dwarf",
+        Simple(
+            "common.items.npc_armor.biped_small.iron_dwarf.chest.iron_dwarf",
+        ): "common-items-npc_armor-biped_small-iron_dwarf-chest-iron_dwarf",
+        Simple(
+            "common.items.npc_armor.biped_small.iron_dwarf.hand.iron_dwarf",
+        ): "common-items-npc_armor-biped_small-iron_dwarf-hand-iron_dwarf",
         Simple(
             "common.items.npc_armor.biped_small.haniwa.foot.archer",
         ): "common-items-npc_armor-biped_small-haniwa-foot-archer",
@@ -505,23 +517,47 @@
             "common.items.npc_armor.biped_small.gnoll.tail.trapper",
         ): "common-items-npc_armor-biped_small-gnoll-tail-trapper",
         Simple(
+            "common.items.npc_armor.biped_small.jiangshi.head.jiangshi",
+        ): "common-items-npc_armor-biped_small-jiangshi-head-jiangshi",
+        Simple(
+            "common.items.npc_armor.biped_small.jiangshi.chest.jiangshi",
+        ): "common-items-npc_armor-biped_small-jiangshi-chest-jiangshi",
+        Simple(
+            "common.items.npc_armor.biped_small.jiangshi.pants.jiangshi",
+        ): "common-items-npc_armor-biped_small-jiangshi-pants-jiangshi",
+        Simple(
+            "common.items.npc_armor.biped_small.jiangshi.hand.jiangshi",
+        ): "common-items-npc_armor-biped_small-jiangshi-hand-jiangshi",
+        Simple(
+            "common.items.npc_armor.biped_small.jiangshi.foot.jiangshi",
+        ): "common-items-npc_armor-biped_small-jiangshi-foot-jiangshi",
+        Simple(
+            "common.items.npc_armor.biped_small.shamanic_spirit.head.shamanic_spirit",
+        ): "common-items-npc_armor-biped_small-shamanic_spirit-head-shamanic_spirit",
+        Simple(
+            "common.items.npc_armor.biped_small.shamanic_spirit.chest.shamanic_spirit",
+        ): "common-items-npc_armor-biped_small-shamanic_spirit-chest-shamanic_spirit",
+        Simple(
+            "common.items.npc_armor.biped_small.shamanic_spirit.pants.shamanic_spirit",
+        ): "common-items-npc_armor-biped_small-shamanic_spirit-pants-shamanic_spirit",
+        Simple(
+            "common.items.npc_armor.biped_small.shamanic_spirit.hand.shamanic_spirit",
+        ): "common-items-npc_armor-biped_small-shamanic_spirit-hand-shamanic_spirit",
+        Simple(
             "common.items.npc_armor.chest.leather_blue",
         ): "armor-leather_blue-pants",
         Simple(
             "common.items.npc_armor.chest.plate_red",
         ): "common-items-npc_armor-chest-plate_red",
         Simple(
-            "common.items.npc_armor.arthropod.generic",
-        ): "common-items-npc_armor-arthropod-generic",
+            "common.items.npc_armor.quadruped_medium.claysteed",
+        ): "common-items-npc_armor-quadruped_medium-claysteed",
         Simple(
-            "common.items.npc_armor.quadruped_medium.frostfang",
-        ): "common-items-npc_armor-quadruped_medium-frostfang",
+            "common.items.npc_armor.generic",
+        ): "common-items-npc_armor-generic",
         Simple(
-            "common.items.npc_armor.quadruped_medium.roshwalr",
-        ): "common-items-npc_armor-quadruped_medium-roshwalr",
-        Simple(
-            "common.items.npc_armor.theropod.rugged",
-        ): "common-items-npc_armor-theropod-rugged",
+            "common.items.npc_armor.generic_high",
+        ): "common-items-npc_armor-generic_high",
         Simple(
             "common.items.npc_armor.back.backpack_blue",
         ): "armor-misc-back-backpack",
@@ -565,38 +601,47 @@
             "common.items.npc_armor.biped_large.yeti",
         ): "common-items-npc_armor-biped_large-yeti",
         Simple(
+            "common.items.npc_armor.biped_large.haniwageneral",
+        ): "common-items-npc_armor-biped_large-haniwageneral",
+        Simple(
+            "common.items.npc_armor.biped_large.terracotta",
+        ): "common-items-npc_armor-biped_large-terracotta",
+        Simple(
+            "common.items.npc_armor.biped_large.forgemaster",
+        ): "common-items-npc_armor-biped_large-forgemaster",
+        Simple(
             "common.items.keys.bone_key",
-        ): "object-key_bone",
+        ): "object-key-bone",
+        Simple(
+            "common.items.keys.haniwa_key",
+        ): "object-key-haniwa",
+        Simple(
+            "common.items.keys.terracotta_key_chest",
+        ): "object-key-terracotta_chest",
+        Simple(
+            "common.items.keys.terracotta_key_door",
+        ): "object-key-terracotta_door",
         Simple(
             "common.items.keys.glass_key",
-        ): "object-key_glass",
+        ): "object-key-glass",
         Simple(
             "common.items.keys.rusty_tower_key",
-        ): "object-key_rusty-0",
+        ): "object-key-rusty",
         Simple(
-            "common.items.keys.quarry_keys.ancient",
-        ): "object-key_rusty-0-ancient",
+            "common.items.keys.quarry_keys.miner_key",
+        ): "object-key-miner",
         Simple(
-            "common.items.keys.quarry_keys.backdoor",
-        ): "object-key_rusty-0-backdoor",
+            "common.items.keys.quarry_keys.forge_key",
+        ): "object-key-forge",
         Simple(
-            "common.items.keys.quarry_keys.cyclops_eye",
-        ): "sprite-crafting_ing-animal_misc-grim_eyeball",
-        Simple(
-            "common.items.keys.quarry_keys.flamekeeper_left",
-        ): "items-keeper_goggle",
-        Simple(
-            "common.items.keys.quarry_keys.flamekeeper_right",
-        ): "items-keeper_goggle-flamekeeper_right",
-        Simple(
-            "common.items.keys.quarry_keys.overseer",
-        ): "object-key_rusty-0-overseer",
-        Simple(
-            "common.items.keys.quarry_keys.smelting",
-        ): "object-key_rusty-0-smelting",
+            "common.items.keys.sahagin_key",
+        ): "object-key-sahagin",
         Simple(
             "common.items.weapons.shield.shield_1",
         ): "weapon-shield-wood-0",
+        Simple(
+            "common.items.weapons.shield.starter_shield",
+        ): "weapon-shield-starter",
         Simple(
             "common.items.weapons.dagger.basic_0",
         ): "weapon-dagger-dagger_basic-0",
@@ -635,10 +680,10 @@
         ): "weapon-staff-laevateinn",
         Simple(
             "common.items.weapons.staff.staff_1",
-        ): "weapon-staff-firestaff_starter",
+        ): "weapon-staff-firestaff_humble_stick",
         Simple(
             "common.items.weapons.staff.starter_staff",
-        ): "weapon-staff-firestaff_starter-starter_staff",
+        ): "weapon-staff-firestaff_starter",
         Simple(
             "common.items.weapons.empty.empty",
         ): "common-items-weapons-empty-empty",
@@ -659,10 +704,10 @@
         ): "weapon-sword-starter",
         Simple(
             "common.items.weapons.tool.broom",
-        ): "weapon-tool-broom-0",
+        ): "weapon-tool-broom",
         Simple(
             "common.items.weapons.tool.fishing_rod",
-        ): "weapon-tool-fishing_rod_blue-0",
+        ): "weapon-tool-fishing_rod_blue",
         Simple(
             "common.items.weapons.tool.golf_club",
         ): "weapon-tool-golf_club",
@@ -671,13 +716,13 @@
         ): "weapon-tool-hoe_green",
         Simple(
             "common.items.weapons.tool.pickaxe",
-        ): "weapon-tool-pickaxe_green-0",
+        ): "weapon-tool-pickaxe_green",
         Simple(
             "common.items.weapons.tool.pitchfork",
-        ): "weapon-tool-pitchfork-0",
+        ): "weapon-tool-pitchfork",
         Simple(
             "common.items.weapons.tool.rake",
-        ): "weapon-tool-rake-0",
+        ): "weapon-tool-rake",
         Simple(
             "common.items.weapons.tool.shovel-0",
         ): "weapon-tool-shovel_green",
@@ -719,7 +764,7 @@
         ): "weapon-hammer-2hhammer_mjolnir",
         Simple(
             "common.items.weapons.hammer.starter_hammer",
-        ): "weapon-hammer-2hhammer_rusty-starter_hammer",
+        ): "weapon-hammer-2hhammer_starter",
         Simple(
             "common.items.armor.hide.carapace.back",
         ): "armor-hide-carapace-back",
@@ -1093,6 +1138,12 @@
             "common.items.armor.misc.head.bandana.thief",
         ): "armor-misc-head-bandana-thief",
         Simple(
+            "common.items.armor.misc.head.hare_hat",
+        ): "armor-misc-head-hare_hat",
+        Simple(
+            "common.items.armor.misc.head.cat_capuche",
+        ): "armor-misc-head-cat_capuche",
+        Simple(
             "common.items.armor.misc.pants.hunting",
         ): "armor-misc-pants-grayscale",
         Simple(
@@ -1130,31 +1181,31 @@
         ): "armor-misc-chest-shirt_white",
         Simple(
             "common.items.armor.misc.chest.worker_orange_0",
-        ): "armor-misc-chest-worker_green-worker_orange_0",
+        ): "armor-misc-chest-worker_orange_0",
         Simple(
             "common.items.armor.misc.chest.worker_orange_1",
-        ): "armor-misc-chest-shirt_white-worker_orange_1",
+        ): "armor-misc-chest-worker_orange_1",
         Simple(
             "common.items.armor.misc.chest.worker_purple_0",
-        ): "armor-misc-chest-worker_green-worker_purple_0",
+        ): "armor-misc-chest-worker_purple_0",
         Simple(
             "common.items.armor.misc.chest.worker_purple_1",
-        ): "armor-misc-chest-shirt_white-worker_purple_1",
+        ): "armor-misc-chest-worker_purple_1",
         Simple(
             "common.items.armor.misc.chest.worker_purple_brown",
         ): "armor-misc-chest-worker_purp_brown",
         Simple(
             "common.items.armor.misc.chest.worker_red_0",
-        ): "armor-misc-chest-worker_green-worker_red_0",
+        ): "armor-misc-chest-worker_red_0",
         Simple(
             "common.items.armor.misc.chest.worker_red_1",
-        ): "armor-misc-chest-shirt_white-worker_red_1",
+        ): "armor-misc-chest-worker_red_1",
         Simple(
             "common.items.armor.misc.chest.worker_yellow_0",
-        ): "armor-misc-chest-worker_green-worker_yellow_0",
+        ): "armor-misc-chest-worker_yellow_0",
         Simple(
             "common.items.armor.misc.chest.worker_yellow_1",
-        ): "armor-misc-chest-shirt_white-worker_yellow_1",
+        ): "armor-misc-chest-worker_yellow_1",
         Simple(
             "common.items.armor.misc.ring.amethyst",
         ): "armor-misc-ring-amethyst",
@@ -1179,6 +1230,9 @@
         Simple(
             "common.items.armor.misc.ring.topaz",
         ): "armor-misc-ring-topaz",
+        Simple(
+            "common.items.armor.misc.ring.abyssal_ring",
+        ): "armor-misc-ring-abyssal_ring",
         Simple(
             "common.items.armor.misc.bag.heavy_seabag",
         ): "armor-misc-bag-heavy_seabag",
@@ -1223,7 +1277,7 @@
         ): "armor-misc-back-admin",
         Simple(
             "common.items.armor.misc.back.backpack",
-        ): "armor-misc-back-backpack-backpack",
+        ): "armor-misc-back-backpack-traveler",
         Simple(
             "common.items.armor.misc.back.dungeon_purple",
         ): "armor-misc-back-dungeon_purple",
@@ -1539,6 +1593,9 @@
         Simple(
             "common.items.armor.mail.orichalcum.shoulder",
         ): "armor-mail-orichalcum-5",
+        Simple(
+            "common.items.armor.mail.orichalcum.head",
+        ): "armor-mail-orichalcum-7",
         Simple(
             "common.items.armor.mail.steel.back",
         ): "armor-mail-steel-back",
@@ -1859,10 +1916,13 @@
         ): "armor-ferocious-shoulder",
         Simple(
             "common.items.debug.admin",
-        ): "armor-tabard_admin-admin",
+        ): "armor-tabard-admin_tabard",
+        Simple(
+            "common.items.debug.glider",
+        ): "other-glider-vroom-debug",
         Simple(
             "common.items.debug.admin_back",
-        ): "armor-misc-back-admin-admin_back",
+        ): "armor-misc-back-admin_back",
         Simple(
             "common.items.debug.admin_black_hole",
         ): "armor-misc-bag-admin_black_hole",
@@ -1871,37 +1931,40 @@
         ): "weapon-tool-broom_belzeshrub_purple",
         Simple(
             "common.items.debug.admin_sword",
-        ): "weapon-sword-frost-1-admin_sword",
+        ): "weapon-sword-frost-admin_sword",
         Simple(
             "common.items.debug.cultist_belt",
-        ): "armor-velorite_battlemage-belt-cultist_belt",
+        ): "armor-velorite-belt",
         Simple(
             "common.items.debug.cultist_boots",
-        ): "armor-velorite_battlemage-foot-cultist_boots",
+        ): "armor-velorite-boots",
         Simple(
             "common.items.debug.cultist_chest_blue",
-        ): "armor-velorite_battlemage-chest-cultist_chest_blue",
+        ): "armor-velorite-chest",
         Simple(
             "common.items.debug.cultist_hands_blue",
-        ): "armor-velorite_battlemage-hand-cultist_hands_blue",
+        ): "armor-velorite-hands",
         Simple(
             "common.items.debug.cultist_legs_blue",
-        ): "armor-velorite_battlemage-pants-cultist_legs_blue",
+        ): "armor-velorite-legs",
         Simple(
             "common.items.debug.cultist_shoulder_blue",
-        ): "armor-velorite_battlemage-shoulder-cultist_shoulder_blue",
+        ): "armor-velorite-shoulder",
         Simple(
             "common.items.debug.dungeon_purple",
-        ): "armor-velorite_battlemage-back-dungeon_purple",
+        ): "armor-velorite-back",
         Simple(
             "common.items.debug.golden_cheese",
         ): "object-item_cheese",
         Simple(
             "common.items.debug.velorite_bow_debug",
-        ): "weapon-bow-velorite-velorite_bow_debug",
+        ): "weapon-bow-velorite-debug",
         Simple(
             "common.items.utility.bomb",
         ): "object-bomb",
+        Simple(
+            "common.items.utility.surprise_egg",
+        ): "object-surprise_egg",
         Simple(
             "common.items.utility.coins",
         ): "object-v-coin",
@@ -1910,22 +1973,22 @@
         ): "object-collar",
         Simple(
             "common.items.utility.firework_blue",
-        ): "weapon-projectile-fireworks_blue-0",
+        ): "weapon-projectile-fireworks_blue",
         Simple(
             "common.items.utility.firework_green",
-        ): "weapon-projectile-fireworks_green-0",
+        ): "weapon-projectile-fireworks_green",
         Simple(
             "common.items.utility.firework_purple",
-        ): "weapon-projectile-fireworks_purple-0",
+        ): "weapon-projectile-fireworks_purple",
         Simple(
             "common.items.utility.firework_red",
-        ): "weapon-projectile-fireworks_red-0",
+        ): "weapon-projectile-fireworks_red",
         Simple(
             "common.items.utility.firework_white",
-        ): "weapon-projectile-fireworks_white-0",
+        ): "weapon-projectile-fireworks_white",
         Simple(
             "common.items.utility.firework_yellow",
-        ): "weapon-projectile-fireworks_yellow-0",
+        ): "weapon-projectile-fireworks_yellow",
         Simple(
             "common.items.utility.lockpick_0",
         ): "object-lockpick",
@@ -2065,7 +2128,7 @@
         ): "common-items-mineral-stone-basalt",
         Simple(
             "common.items.mineral.stone.coal",
-        ): "sprite-mineral-ore-coal",
+        ): "common-items-mineral-stone-coal",
         Simple(
             "common.items.mineral.stone.granite",
         ): "common-items-mineral-stone-granite",
@@ -2077,7 +2140,7 @@
         ): "sprite-mineral-ore-bloodstone",
         Simple(
             "common.items.mineral.ore.coal",
-        ): "sprite-mineral-ore-coal-coal",
+        ): "sprite-mineral-ore-coal",
         Simple(
             "common.items.mineral.ore.cobalt",
         ): "sprite-mineral-ore-cobalt",
@@ -2096,6 +2159,9 @@
         Simple(
             "common.items.mineral.ore.tin",
         ): "sprite-mineral-ore-tin",
+        Simple(
+            "common.items.mineral.ore.ancient_gold",
+        ): "sprite-mineral-ore-ancient_gold",
         Simple(
             "common.items.mineral.ore.velorite",
         ): "sprite-velorite-velorite_ore",
@@ -2161,7 +2227,7 @@
         ): "glider-blue",
         Simple(
             "common.items.glider.butterfly3",
-        ): "glider-butterfly3",
+        ): "glider-butterfly-moonlit_love",
         Simple(
             "common.items.glider.cloverleaf",
         ): "glider-cloverleaf",
@@ -2170,13 +2236,13 @@
         ): "glider-leaves",
         Simple(
             "common.items.glider.monarch",
-        ): "glider-butterfly2",
+        ): "glider-butterfly-orange_monarch",
         Simple(
             "common.items.glider.moonrise",
         ): "glider-moonrise",
         Simple(
             "common.items.glider.morpho",
-        ): "glider-butterfly1",
+        ): "glider-butterfly-blue_morpho",
         Simple(
             "common.items.glider.moth",
         ): "glider-moth",
@@ -2203,7 +2269,7 @@
         ): "weapon-hammer-craftsman",
         Simple(
             "common.items.tool.pickaxe_steel",
-        ): "weapon-tool-pickaxe_green-1",
+        ): "weapon-tool-pickaxe_steel",
         Simple(
             "common.items.tool.pickaxe_stone",
         ): "weapon-tool-pickaxe_stone",
@@ -2249,6 +2315,12 @@
         Simple(
             "common.items.tool.instruments.wildskin_drum",
         ): "weapon-tool-wildskin_drum",
+        Simple(
+            "common.items.tool.instruments.steeltonguedrum",
+        ): "weapon-tool-steeltonguedrum",
+        Simple(
+            "common.items.tool.instruments.shamisen",
+        ): "weapon-tool-shamisen",
         Simple(
             "common.items.log.bamboo",
         ): "sprite-wood-item-bamboo",
@@ -2344,6 +2416,9 @@
             "common.items.npc_weapons.bow.saurok_bow",
         ): "common-items-npc_weapons-bow-saurok_bow",
         Simple(
+            "common.items.npc_weapons.bow.terracotta_besieger_bow",
+        ): "common-items-npc_weapons-bow-terracotta_besieger_bow",
+        Simple(
             "common.items.npc_weapons.axe.gigas_frost_axe",
         ): "common-items-npc_weapons-axe-gigas_frost_axe",
         Simple(
@@ -2380,14 +2455,14 @@
             "common.items.npc_weapons.sword.saurok_sword",
         ): "common-items-npc_weapons-sword-saurok_sword",
         Simple(
+            "common.items.npc_weapons.sword.haniwa_general_sword",
+        ): "common-items-npc_weapons-sword-haniwa_general_sword",
+        Simple(
+            "common.items.npc_weapons.sword.terracotta_pursuer_sword",
+        ): "common-items-npc_weapons-sword-terracotta_pursuer_sword",
+        Simple(
             "common.items.npc_weapons.unique.akhlut",
         ): "common-items-npc_weapons-unique-akhlut",
-        Simple(
-            "common.items.npc_weapons.unique.asp",
-        ): "common-items-npc_weapons-unique-asp",
-        Simple(
-            "common.items.npc_weapons.unique.basilisk",
-        ): "common-items-npc_weapons-unique-basilisk",
         Simple(
             "common.items.npc_weapons.unique.beast_claws",
         ): "common-items-npc_weapons-unique-beast_claws",
@@ -2413,8 +2488,17 @@
             "common.items.npc_weapons.unique.clay_golem_fist",
         ): "common-items-npc_weapons-unique-clay_golem_fist",
         Simple(
-            "common.items.npc_weapons.unique.clockwork",
-        ): "common-items-npc_weapons-unique-clockwork",
+            "common.items.npc_weapons.unique.iron_golem_fist",
+        ): "common-items-npc_weapons-unique-iron_golem_fist",
+        Simple(
+            "common.items.npc_weapons.hammer.forgemaster_hammer",
+        ): "common-items-npc_weapons-hammer-forgemaster_hammer",
+        Simple(
+            "common.items.npc_weapons.unique.snaretongue",
+        ): "common-items-npc_weapons-unique-snaretongue",
+        Simple(
+            "common.items.npc_weapons.unique.iron_dwarf",
+        ): "common-items-npc_weapons-unique-iron_dwarf",
         Simple(
             "common.items.npc_weapons.unique.cloudwyvern",
         ): "common-items-npc_weapons-unique-cloudwyvern",
@@ -2428,9 +2512,6 @@
             "common.items.npc_weapons.unique.dagon",
         ): "common-items-npc_weapons-unique-dagon",
         Simple(
-            "common.items.npc_weapons.unique.deadwood",
-        ): "common-items-npc_weapons-unique-deadwood",
-        Simple(
             "common.items.npc_weapons.unique.driggle",
         ): "common-items-npc_weapons-unique-driggle",
         Simple(
@@ -2442,6 +2523,27 @@
         Simple(
             "common.items.npc_weapons.unique.flamekeeper_staff",
         ): "common-items-npc_weapons-unique-flamekeeper_staff",
+        Simple(
+            "common.items.npc_weapons.unique.jiangshi",
+        ): "common-items-npc_weapons-unique-jiangshi",
+        Simple(
+            "common.items.npc_weapons.unique.mogwai",
+        ): "common-items-npc_weapons-unique-mogwai",
+        Simple(
+            "common.items.npc_weapons.unique.shamanic_spirit",
+        ): "common-items-npc_weapons-unique-shamanic_spirit",
+        Simple(
+            "common.items.npc_weapons.unique.terracotta_demolisher_fist",
+        ): "common-items-npc_weapons-unique-terracotta_demolisher_fist",
+        Simple(
+            "common.items.npc_weapons.unique.cursekeeper_sceptre",
+        ): "common-items-npc_weapons-unique-cursekeeper_sceptre",
+        Simple(
+            "common.items.npc_weapons.unique.cursekeeper_sceptre_fake",
+        ): "common-items-npc_weapons-unique-cursekeeper_sceptre_fake",
+        Simple(
+            "common.items.npc_weapons.unique.terracotta_statue",
+        ): "common-items-npc_weapons-unique-terracotta_statue",
         Simple(
             "common.items.npc_weapons.unique.flamethrower",
         ): "common-items-npc_weapons-unique-flamethrower",
@@ -2458,29 +2560,86 @@
             "common.items.npc_weapons.unique.haniwa_sentry",
         ): "common-items-npc_weapons-unique-haniwa_sentry",
         Simple(
-            "common.items.npc_weapons.unique.hermit_alligator",
-        ): "common-items-npc_weapons-unique-hermit_alligator",
-        Simple(
             "common.items.npc_weapons.unique.husk",
         ): "common-items-npc_weapons-unique-husk",
         Simple(
             "common.items.npc_weapons.unique.husk_brute",
         ): "common-items-npc_weapons-unique-husk_brute",
         Simple(
-            "common.items.npc_weapons.unique.icedrake",
-        ): "common-items-npc_weapons-unique-icedrake",
-        Simple(
             "common.items.npc_weapons.unique.irrwurz",
         ): "common-items-npc_weapons-unique-irrwurz",
-        Simple(
-            "common.items.npc_weapons.unique.maneater",
-        ): "common-items-npc_weapons-unique-maneater",
         Simple(
             "common.items.npc_weapons.unique.mossysnail",
         ): "common-items-npc_weapons-unique-mossysnail",
         Simple(
             "common.items.npc_weapons.unique.organ",
         ): "common-items-npc_weapons-unique-organ",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.hakulaq",
+        ): "common-items-npc_weapons-unique-quadruped_low-hakulaq",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.tortoise",
+        ): "common-items-npc_weapons-unique-quadruped_low-tortoise",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.alpaca",
+        ): "common-items-npc_weapons-unique-quadruped_medium-alpaca",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.antelope",
+        ): "common-items-npc_weapons-unique-quadruped_medium-antelope",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.donkey",
+        ): "common-items-npc_weapons-unique-quadruped_medium-donkey",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.grolgar",
+        ): "common-items-npc_weapons-unique-quadruped_medium-grolgar",
+	Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.highland",
+        ): "common-items-npc_weapons-unique-quadruped_medium-highland",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.horse",
+        ): "common-items-npc_weapons-unique-quadruped_medium-horse",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.moose",
+        ): "common-items-npc_weapons-unique-quadruped_medium-moose",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.mouflon",
+        ): "common-items-npc_weapons-unique-quadruped_medium-mouflon",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_medium.wolf",
+        ): "common-items-npc_weapons-unique-quadruped_medium-wolf",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.asp",
+        ): "common-items-npc_weapons-unique-quadruped_low-asp",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.basilisk",
+        ): "common-items-npc_weapons-unique-quadruped_low-basilisk",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.deadwood",
+        ): "common-items-npc_weapons-unique-quadruped_low-deadwood",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.icedrake",
+        ): "common-items-npc_weapons-unique-quadruped_low-icedrake",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.lavadrake",
+        ): "common-items-npc_weapons-unique-quadruped_low-lavadrake",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_low.maneater",
+        ): "common-items-npc_weapons-unique-quadruped_low-maneater",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_small.boar",
+        ): "common-items-npc_weapons-unique-quadruped_small-boar",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_small.hyena",
+        ): "common-items-npc_weapons-unique-quadruped_small-hyena",
+        Simple(
+            "common.items.npc_weapons.unique.quadruped_small.rodent",
+        ): "common-items-npc_weapons-unique-quadruped_small-rodent",
+        Simple(
+            "common.items.npc_weapons.unique.theropod.yale",
+        ): "common-items-npc_weapons-unique-theropod-yale",
+        Simple(
+            "common.items.npc_weapons.unique.theropod",
+        ): "common-items-npc_weapons-unique-theropod",
         Simple(
             "common.items.npc_weapons.unique.quadlowbasic",
         ): "common-items-npc_weapons-unique-quadlowbasic",
@@ -2517,6 +2676,12 @@
         Simple(
             "common.items.npc_weapons.unique.quadsmallbasic",
         ): "common-items-npc_weapons-unique-quadsmallbasic",
+        Simple(
+            "common.items.npc_weapons.unique.darkhound",
+        ): "common-items-npc_weapons-unique-darkhound",
+        Simple(
+            "common.items.npc_weapons.unique.rocksnapper",
+        ): "common-items-npc_weapons-unique-rocksnapper",
         Simple(
             "common.items.npc_weapons.unique.roshwalr",
         ): "common-items-npc_weapons-unique-roshwalr",
@@ -2572,6 +2737,15 @@
             "common.items.npc_weapons.unique.wood_golem_fist",
         ): "common-items-npc_weapons-unique-wood_golem_fist",
         Simple(
+            "common.items.npc_weapons.unique.ancient_effigy_eyes",
+        ): "common-items-npc_weapons-unique-ancient_effigy_eyes",
+        Simple(
+            "common.items.npc_weapons.unique.claysteed",
+        ): "common-items-npc_weapons-unique-claysteed",
+        Simple(
+            "common.items.npc_weapons.unique.gravewarden_fist",
+        ): "common-items-npc_weapons-unique-gravewarden_fist",
+        Simple(
             "common.items.npc_weapons.unique.arthropods.antlion",
         ): "common-items-npc_weapons-unique-arthropods-antlion",
         Simple(
@@ -2589,6 +2763,9 @@
         Simple(
             "common.items.npc_weapons.unique.arthropods.leafbeetle",
         ): "common-items-npc_weapons-unique-arthropods-leafbeetle",
+        Simple(
+            "common.items.npc_weapons.unique.arthropods.moltencrawler",
+        ): "common-items-npc_weapons-unique-arthropods-moltencrawler",
         Simple(
             "common.items.npc_weapons.unique.arthropods.mosscrawler",
         ): "common-items-npc_weapons-unique-arthropods-mosscrawler",
@@ -2622,6 +2799,9 @@
         Simple(
             "common.items.npc_weapons.hammer.yeti_hammer",
         ): "common-items-npc_weapons-hammer-yeti_hammer",
+        Simple(
+            "common.items.npc_weapons.hammer.terracotta_punisher_club",
+        ): "common-items-npc_weapons-hammer-terracotta_punisher_club",
         Simple(
             "common.items.modular.weapon.primary.bow.bow",
         ): "common-items-modular-weapon-primary-bow-bow",
@@ -2857,6 +3037,15 @@
             "common.items.crafting_ing.sticky_thread",
         ): "sprite-crafting_ing-sticky_thread",
         Simple(
+            "common.items.crafting_ing.alkahest",
+        ): "sprite-crafting_ing-alkahest",
+        Simple(
+            "common.items.crafting_ing.dwarven_battery",
+        ): "sprite-crafting_ing-dwarven_battery",
+        Simple(
+            "common.items.crafting_ing.dwarven_battery",
+        ): "sprite-crafting_ing-dwarven_battery",
+        Simple(
             "common.items.crafting_ing.stones",
         ): "sprite-rocks-rock-0",
         Simple(
@@ -2906,7 +3095,7 @@
         ): "sprite-crafting_ing-animal_misc-fur",
         Simple(
             "common.items.crafting_ing.animal_misc.grim_eyeball",
-        ): "sprite-crafting_ing-animal_misc-grim_eyeball-grim_eyeball",
+        ): "sprite-crafting_ing-animal_misc-grim_eyeball",
         Simple(
             "common.items.crafting_ing.animal_misc.icy_fang",
         ): "object-ice_shard",
@@ -2977,44 +3166,47 @@
             "common.items.crafting_ing.cloth.wool",
         ): "sprite-crafting_ing-cloth-wool",
         Simple(
-            "common.items.consumable.curious_potion",
-        ): "object-curious_potion",
+            "common.items.consumable.potion_curious",
+        ): "object-potion_curious",
         Simple(
             "common.items.consumable.potion_agility",
         ): "object-potion_agility",
         Simple(
             "common.items.consumable.potion_big",
-        ): "object-potion_red-potion_big",
+        ): "object-potion_big",
         Simple(
             "common.items.consumable.potion_combustion",
         ): "object-potion_combustion",
         Simple(
             "common.items.consumable.potion_med",
-        ): "object-potion_red-potion_med",
+        ): "object-potion_med",
         Simple(
             "common.items.consumable.potion_minor",
-        ): "object-potion_red-potion_minor",
+        ): "object-potion_minor",
         Simple(
             "common.items.lantern.black_0",
-        ): "lantern-black-0",
+        ): "lantern-black",
         Simple(
             "common.items.lantern.blue_0",
-        ): "lantern-blue-0",
+        ): "lantern-blue",
         Simple(
             "common.items.lantern.geode_purp",
         ): "lantern-geode_purp",
         Simple(
             "common.items.lantern.green_0",
-        ): "lantern-green-0",
+        ): "lantern-green",
         Simple(
             "common.items.lantern.polaris",
         ): "lantern-polaris",
+        Simple(
+            "common.items.lantern.delvers_lamp",
+        ): "lantern-delvers_lamp",
         Simple(
             "common.items.lantern.pumpkin",
         ): "lantern-pumpkin",
         Simple(
             "common.items.lantern.red_0",
-        ): "lantern-red-0",
+        ): "lantern-red",
         Simple(
             "common.items.charms.burning_charm",
         ): "object-burning_charm",
@@ -3059,7 +3251,7 @@
         ): "sprite-flowers-flax",
         Simple(
             "common.items.flowers.yellow",
-        ): "sprite-flowers-sunflower_1-yellow",
+        ): "sprite-flowers-yellow",
         ModularWeaponComponent(
             (
                 "common.items.modular.weapon.primary.axe.labrys",
@@ -6882,5 +7074,50 @@
                 One,
             ),
         ): "weapon-hammer-hammer-cobalt-1h",
+        Simple("common.items.recipes.armor.bloodsteel"): "recipe-armor-bloodsteel",
+        Simple("common.items.recipes.armor.brinestone"): "recipe-armor-brinestone",
+        Simple("common.items.recipes.armor.carapace"): "recipe-armor-carapace",
+        Simple("common.items.recipes.armor.cobalt"): "recipe-armor-cobalt",
+        Simple("common.items.recipes.armor.dragonscale"): "recipe-armor-dragonscale",
+        Simple("common.items.recipes.armor.druid"): "recipe-armor-druid",
+        Simple("common.items.recipes.armor.iron"): "recipe-armor-iron",
+        Simple("common.items.recipes.armor.leather"): "recipe-armor-leather",
+        Simple("common.items.recipes.armor.moonweave"): "recipe-armor-moonweave",
+        Simple("common.items.recipes.armor.orichalcum"): "recipe-armor-orichalcum",
+        Simple("common.items.recipes.armor.primal"): "recipe-armor-primal",
+        Simple("common.items.recipes.armor.scale"): "recipe-armor-scale",
+        Simple("common.items.recipes.armor.silken"): "recipe-armor-silken",
+        Simple("common.items.recipes.armor.steel"): "recipe-armor-steel",
+        Simple("common.items.recipes.armor.sunsilk"): "recipe-armor-sunsilk",
+        Simple("common.items.recipes.armor.woolen"): "recipe-armor-woolen",
+        Simple("common.items.recipes.equipment.basic"): "recipe-equipment-basic",
+        Simple("common.items.recipes.equipment.moderate"): "recipe-equipment-moderate",
+        Simple("common.items.recipes.equipment.advanced"): "recipe-equipment-advanced",
+        Simple("common.items.recipes.unique.abyssal_gorget"): "recipe-unique-abyssal_gorget",
+        Simple("common.items.recipes.unique.abyssal_ring"): "recipe-unique-abyssal_ring",
+        Simple("common.items.recipes.unique.mindflayer_spellbag"): "recipe-unique-mindflayer_spellbag",
+        Simple("common.items.recipes.unique.polaris"): "recipe-unique-polaris",
+        Simple("common.items.recipes.unique.seashell_necklace"): "recipe-unique-seashell_necklace",
+        Simple("common.items.recipes.unique.troll_hide_pack"): "recipe-unique-troll_hide_pack",
+        Simple("common.items.recipes.unique.winged_coronet"): "recipe-unique-winged_coronet",
+        Simple("common.items.recipes.unique.delvers_lamp"): "recipe-unique-delvers_lamp",
+        Simple("common.items.recipes.charms"): "recipe-charms",
+        Simple("common.items.recipes.explosives"): "recipe-explosives",
+        Simple("common.items.recipes.food"): "recipe-food",
+        Simple("common.items.recipes.gliders"): "recipe-gliders",
+        Simple("common.items.recipes.instruments"): "recipe-instruments",
+        Simple("common.items.recipes.potions"): "recipe-potions",
+        Simple("common.items.recipes.utility"): "recipe-utility",
+        Simple("common.items.recipes.weapons.iron"): "recipe-weapons-iron",
+        Simple("common.items.recipes.weapons.steel"): "recipe-weapons-steel",
+        Simple("common.items.recipes.weapons.cobalt"): "recipe-weapons-cobalt",
+        Simple("common.items.recipes.weapons.bloodsteel"): "recipe-weapons-bloodsteel",
+        Simple("common.items.recipes.weapons.orichalcum"): "recipe-weapons-orichalcum",
+        Simple("common.items.recipes.weapons.bamboo"): "recipe-weapons-bamboo",
+        Simple("common.items.recipes.weapons.hardwood"): "recipe-weapons-hardwood",
+        Simple("common.items.recipes.weapons.ironwood"): "recipe-weapons-ironwood",
+        Simple("common.items.recipes.weapons.frostwood"): "recipe-weapons-frostwood",
+        Simple("common.items.recipes.weapons.eldwood"): "recipe-weapons-eldwood",
+        Simple("common.items.recipes.default"): "recipe-default",
     },
 )

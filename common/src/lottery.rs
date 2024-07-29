@@ -207,7 +207,7 @@ pub fn distribute_many<T: Copy + Eq + Hash, I>(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum LootSpec<T: AsRef<str>> {
     /// Asset specifier
     Item(T),
@@ -232,6 +232,8 @@ pub enum LootSpec<T: AsRef<str>> {
     /// Each category is evaluated, often used to have guaranteed quest Item +
     /// random reward
     All(Vec<LootSpec<T>>),
+    /// Like a `LootTable` but inline
+    Lottery(Vec<(f32, LootSpec<T>)>),
 }
 
 impl<T: AsRef<str>> LootSpec<T> {
@@ -289,6 +291,18 @@ impl<T: AsRef<str>> LootSpec<T> {
                 let loot_spec = Lottery::<LootSpec<String>>::load_expect(table.as_ref()).read();
                 for _ in 0..amount {
                     loot_spec.choose().to_items_inner(rng, 1, items)
+                }
+            },
+            Self::Lottery(table) => {
+                let lottery = Lottery::from(
+                    table
+                        .iter()
+                        .map(|(weight, spec)| (*weight, spec))
+                        .collect::<Vec<_>>(),
+                );
+
+                for _ in 0..amount {
+                    lottery.choose().to_items_inner(rng, 1, items)
                 }
             },
             Self::Nothing => {},
@@ -368,8 +382,11 @@ impl Default for LootSpec<String> {
 
 #[cfg(test)]
 pub mod tests {
+    use std::borrow::Borrow;
+
     use super::*;
     use crate::{assets, comp::Item};
+    use assets::AssetExt;
 
     #[cfg(test)]
     pub fn validate_loot_spec(item: &LootSpec<String>) {
@@ -379,8 +396,8 @@ pub mod tests {
                 Item::new_from_asset_expect(item);
             },
             LootSpec::LootTable(loot_table) => {
-                let loot_table = Lottery::<LootSpec<String>>::load_expect_cloned(loot_table);
-                validate_table_contents(loot_table);
+                let loot_table = Lottery::<LootSpec<String>>::load_expect(loot_table).read();
+                validate_table_contents(&loot_table);
             },
             LootSpec::Nothing => {},
             LootSpec::ModularWeapon {
@@ -425,21 +442,32 @@ pub mod tests {
                     validate_loot_spec(loot_spec);
                 }
             },
+            LootSpec::Lottery(table) => {
+                let lottery = Lottery::from(
+                    table
+                        .iter()
+                        .map(|(weight, spec)| (*weight, spec))
+                        .collect::<Vec<_>>(),
+                );
+
+                validate_table_contents(&lottery);
+            },
         }
     }
 
-    fn validate_table_contents(table: Lottery<LootSpec<String>>) {
+    fn validate_table_contents<T: Borrow<LootSpec<String>>>(table: &Lottery<T>) {
         for (_, item) in table.iter() {
-            validate_loot_spec(item);
+            validate_loot_spec(item.borrow());
         }
     }
 
     #[test]
     fn test_loot_tables() {
-        let loot_tables =
-            assets::read_expect_dir::<Lottery<LootSpec<String>>>("common.loot_tables", true);
-        for loot_table in loot_tables {
-            validate_table_contents(loot_table.clone());
+        let loot_tables = assets::load_rec_dir::<Lottery<LootSpec<String>>>("common.loot_tables")
+            .expect("load loot_tables");
+        for loot_table in loot_tables.read().ids() {
+            let loot_table = Lottery::<LootSpec<String>>::load_expect(loot_table);
+            validate_table_contents(&loot_table.read());
         }
     }
 

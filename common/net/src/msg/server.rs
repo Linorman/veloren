@@ -6,18 +6,18 @@ use crate::sync;
 use common::{
     calendar::Calendar,
     character::{self, CharacterItem},
-    comp::{self, invite::InviteKind, item::MaterialStatManifest, Content},
-    event::UpdateCharacterMetadata,
+    comp::{self, body::Gender, invite::InviteKind, item::MaterialStatManifest, Content},
+    event::{PluginHash, UpdateCharacterMetadata},
     lod,
     outcome::Outcome,
-    recipe::{ComponentRecipeBook, RecipeBook, RepairRecipeBook},
+    recipe::{ComponentRecipeBook, RecipeBookManifest, RepairRecipeBook},
     resources::{Time, TimeOfDay, TimeScale},
     shared_server_config::ServerConstants,
     terrain::{Block, TerrainChunk, TerrainChunkMeta, TerrainChunkSize},
     trade::{PendingTrade, SitePrices, TradeId, TradeResult},
     uid::Uid,
     uuid::Uuid,
-    weather::WeatherGrid,
+    weather::SharedWeatherGrid,
 };
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,7 @@ pub enum ServerMsg {
     Init(Box<ServerInit>),
     /// Result to `ClientMsg::Register`. send ONCE
     RegisterAnswer(ServerRegisterAnswer),
-    ///Msg that can be send ALWAYS as soon as client is registered, e.g. `Chat`
+    /// Msg that can be send ALWAYS as soon as client is registered, e.g. `Chat`
     General(ServerGeneral),
     Ping(PingMsg),
 }
@@ -68,13 +68,14 @@ pub enum ServerInit {
         max_group_size: u32,
         client_timeout: Duration,
         world_map: crate::msg::world_msg::WorldMapMsg,
-        recipe_book: RecipeBook,
+        recipe_book: RecipeBookManifest,
         component_recipe_book: ComponentRecipeBook,
         repair_recipe_book: RepairRecipeBook,
         material_stats: MaterialStatManifest,
         ability_map: comp::item::tool::AbilityMap,
         server_constants: ServerConstants,
         description: ServerDescription,
+        active_plugins: Vec<PluginHash>,
     },
 }
 
@@ -162,7 +163,7 @@ pub enum ServerGeneral {
     /// currently pending
     InvitePending(Uid),
     /// Update the HUD of the clients in the group
-    GroupInventoryUpdate(comp::Item, String, Uid),
+    GroupInventoryUpdate(comp::FrontendItem, Uid),
     /// Note: this could potentially include all the failure cases such as
     /// inviting yourself in which case the `InvitePending` message could be
     /// removed and the client could consider their invite pending until
@@ -214,10 +215,16 @@ pub enum ServerGeneral {
     /// Economic information about sites
     SiteEconomy(EconomyInfo),
     MapMarker(comp::MapMarkerUpdate),
-    WeatherUpdate(WeatherGrid),
+    WeatherUpdate(SharedWeatherGrid),
+    LocalWindUpdate(Vec2<f32>),
     /// Suggest the client to spectate a position. Called after client has
     /// requested teleport etc.
     SpectatePosition(Vec3<f32>),
+    /// Plugin data requested from the server
+    PluginData(Vec<u8>),
+    /// Update the list of available recipes. Usually called after a new recipe
+    /// is acquired
+    UpdateRecipes,
 }
 
 impl ServerGeneral {
@@ -256,13 +263,14 @@ pub struct PlayerInfo {
 /// used for localisation, filled by client and used by i18n code
 pub struct ChatTypeContext {
     pub you: Uid,
-    pub player_alias: HashMap<Uid, PlayerInfo>,
+    pub player_info: HashMap<Uid, PlayerInfo>,
     pub entity_name: HashMap<Uid, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterInfo {
     pub name: String,
+    pub gender: Option<Gender>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,7 +336,7 @@ impl ServerMsg {
                         | ServerGeneral::InviteComplete { .. }
                         | ServerGeneral::ExitInGameSuccess
                         | ServerGeneral::InventoryUpdate(_, _)
-                        | ServerGeneral::GroupInventoryUpdate(_, _, _)
+                        | ServerGeneral::GroupInventoryUpdate(_, _)
                         | ServerGeneral::TerrainChunkUpdate { .. }
                         | ServerGeneral::TerrainBlockUpdates(_)
                         | ServerGeneral::SetViewDistance(_)
@@ -339,7 +347,9 @@ impl ServerMsg {
                         | ServerGeneral::SiteEconomy(_)
                         | ServerGeneral::MapMarker(_)
                         | ServerGeneral::WeatherUpdate(_)
-                        | ServerGeneral::SpectatePosition(_) => {
+                        | ServerGeneral::LocalWindUpdate(_)
+                        | ServerGeneral::SpectatePosition(_)
+                        | ServerGeneral::UpdateRecipes => {
                             c_type == ClientType::Game && presence.is_some()
                         },
                         // Always possible
@@ -355,6 +365,7 @@ impl ServerMsg {
                         | ServerGeneral::Disconnect(_)
                         | ServerGeneral::Notification(_)
                         | ServerGeneral::LodZoneUpdate { .. } => true,
+                        ServerGeneral::PluginData(_) => true,
                     }
             },
             ServerMsg::Ping(_) => true,

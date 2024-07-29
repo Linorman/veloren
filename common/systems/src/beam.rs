@@ -2,10 +2,12 @@ use common::{
     combat::{self, AttackOptions, AttackSource, AttackerInfo, TargetInfo},
     comp::{
         agent::{Sound, SoundKind},
-        Alignment, Beam, Body, Buffs, CharacterState, Combo, Energy, Group, Health, Inventory, Ori,
-        Player, Pos, Scale, Stats,
+        aura::EnteredAuras,
+        Alignment, Beam, Body, Buffs, CharacterState, Combo, Energy, Group, Health, Inventory,
+        Mass, Ori, Player, Pos, Scale, Stats,
     },
-    event::{EventBus, ServerEvent},
+    event::{self, EmitExt, EventBus},
+    event_emitters,
     outcome::Outcome,
     resources::{DeltaTime, Time},
     terrain::TerrainGrid,
@@ -21,11 +23,24 @@ use specs::{
 };
 use vek::*;
 
+event_emitters! {
+    struct ReadAttackEvents[AttackEmitters] {
+        health_change: event::HealthChangeEvent,
+        energy_change: event::EnergyChangeEvent,
+        poise_change: event::PoiseChangeEvent,
+        sound: event::SoundEvent,
+        parry_hook: event::ParryHookEvent,
+        kockback: event::KnockbackEvent,
+        entity_attack_hoow: event::EntityAttackedHookEvent,
+        combo_change: event::ComboChangeEvent,
+        buff: event::BuffEvent,
+    }
+}
+
 #[derive(SystemData)]
 pub struct ReadData<'a> {
     entities: Entities<'a>,
     players: ReadStorage<'a, Player>,
-    server_bus: Read<'a, EventBus<ServerEvent>>,
     time: Read<'a, Time>,
     dt: Read<'a, DeltaTime>,
     terrain: ReadExpect<'a, TerrainGrid>,
@@ -45,7 +60,10 @@ pub struct ReadData<'a> {
     combos: ReadStorage<'a, Combo>,
     character_states: ReadStorage<'a, CharacterState>,
     buffs: ReadStorage<'a, Buffs>,
+    entered_auras: ReadStorage<'a, EnteredAuras>,
     outcomes: Read<'a, EventBus<Outcome>>,
+    events: ReadAttackEvents<'a>,
+    masses: ReadStorage<'a, Mass>,
 }
 
 /// This system is responsible for handling beams that heal or do damage
@@ -59,7 +77,6 @@ impl<'a> System<'a> for Sys {
     const PHASE: Phase = Phase::Create;
 
     fn run(job: &mut Job<Self>, (read_data, mut beams): Self::SystemData) {
-        let mut server_emitter = read_data.server_bus.emitter();
         let mut outcomes_emitter = read_data.outcomes.emitter();
 
         (
@@ -100,7 +117,8 @@ impl<'a> System<'a> for Sys {
         job.cpu_stats.measure(ParMode::Rayon);
 
         // Beams
-        let (server_events, add_hit_entities, new_outcomes) = (
+        // Emitters will append their events when dropped.
+        let (_emitters, add_hit_entities, new_outcomes) = (
             &read_data.entities,
             &read_data.positions,
             &read_data.orientations,
@@ -109,14 +127,14 @@ impl<'a> System<'a> for Sys {
         )
             .par_join()
             .fold(
-                || (Vec::new(), Vec::new(), Vec::new()),
-                |(mut server_events, mut add_hit_entities, mut outcomes),
+                || (read_data.events.get_emitters(), Vec::new(), Vec::new()),
+                |(mut emitters, mut add_hit_entities, mut outcomes),
                  (entity, pos, ori, uid, beam)| {
                     // Note: rayon makes it difficult to hold onto a thread-local RNG, if grabbing
                     // this becomes a bottleneck we can look into alternatives.
                     let mut rng = rand::thread_rng();
                     if rng.gen_bool(0.005) {
-                        server_events.push(ServerEvent::Sound {
+                        emitters.emit(event::SoundEvent {
                             sound: Sound::new(SoundKind::Beam, pos.0, 13.0, read_data.time.0),
                         });
                     }
@@ -172,7 +190,7 @@ impl<'a> System<'a> for Sys {
                         // Finally, ensure that a hit has actually occurred by performing a raycast.
                         // We do this last because it's likely to be the
                         // most expensive operation.
-                        let tgt_dist = pos.0.distance(pos_b.0);
+                        let tgt_dist = beam.bezier.start.distance(pos_b.0);
                         let beam_dir = (beam.bezier.ctrl - beam.bezier.start)
                             / beam.bezier.start.distance(beam.bezier.ctrl).max(0.01);
                         let hit = hit
@@ -188,6 +206,12 @@ impl<'a> System<'a> for Sys {
                                 >= tgt_dist;
 
                         if hit {
+                            let allow_friendly_fire = combat::allow_friendly_fire(
+                                &read_data.entered_auras,
+                                entity,
+                                target,
+                            );
+
                             // See if entities are in the same group
                             let same_group = group
                                 .map(|group_a| Some(group_a) == read_data.groups.get(target))
@@ -207,6 +231,7 @@ impl<'a> System<'a> for Sys {
                                 combo: read_data.combos.get(entity),
                                 inventory: read_data.inventories.get(entity),
                                 stats: read_data.stats.get(entity),
+                                mass: read_data.masses.get(entity),
                             });
 
                             let target_info = TargetInfo {
@@ -220,6 +245,7 @@ impl<'a> System<'a> for Sys {
                                 char_state: read_data.character_states.get(target),
                                 energy: read_data.energies.get(target),
                                 buffs: read_data.buffs.get(target),
+                                mass: read_data.masses.get(target),
                             };
 
                             let target_dodging = read_data
@@ -228,9 +254,10 @@ impl<'a> System<'a> for Sys {
                                 .and_then(|cs| cs.attack_immunities())
                                 .map_or(false, |i| i.beams);
                             // PvP check
-                            let may_harm = combat::may_harm(
+                            let permit_pvp = combat::permit_pvp(
                                 &read_data.alignments,
                                 &read_data.players,
+                                &read_data.entered_auras,
                                 &read_data.id_maps,
                                 Some(entity),
                                 target,
@@ -239,6 +266,8 @@ impl<'a> System<'a> for Sys {
                             let precision_from_flank = combat::precision_mult_from_flank(
                                 beam.bezier.ctrl - beam.bezier.start,
                                 target_info.ori,
+                                Default::default(),
+                                false,
                             );
 
                             let precision_from_time = {
@@ -260,7 +289,8 @@ impl<'a> System<'a> for Sys {
 
                             let attack_options = AttackOptions {
                                 target_dodging,
-                                may_harm,
+                                permit_pvp,
+                                allow_friendly_fire,
                                 target_group,
                                 precision_mult,
                             };
@@ -273,7 +303,7 @@ impl<'a> System<'a> for Sys {
                                 1.0,
                                 AttackSource::Beam,
                                 *read_data.time,
-                                |e| server_events.push(e),
+                                &mut emitters,
                                 |o| outcomes.push(o),
                                 &mut rng,
                                 0,
@@ -282,14 +312,14 @@ impl<'a> System<'a> for Sys {
                             add_hit_entities.push((entity, target));
                         }
                     });
-                    (server_events, add_hit_entities, outcomes)
+                    (emitters, add_hit_entities, outcomes)
                 },
             )
             .reduce(
-                || (Vec::new(), Vec::new(), Vec::new()),
+                || (read_data.events.get_emitters(), Vec::new(), Vec::new()),
                 |(mut events_a, mut hit_entities_a, mut outcomes_a),
-                 (mut events_b, mut hit_entities_b, mut outcomes_b)| {
-                    events_a.append(&mut events_b);
+                 (events_b, mut hit_entities_b, mut outcomes_b)| {
+                    events_a.append(events_b);
                     hit_entities_a.append(&mut hit_entities_b);
                     outcomes_a.append(&mut outcomes_b);
                     (events_a, hit_entities_a, outcomes_a)
@@ -298,7 +328,6 @@ impl<'a> System<'a> for Sys {
         job.cpu_stats.measure(ParMode::Single);
 
         outcomes_emitter.emit_many(new_outcomes);
-        server_emitter.emit_many(server_events);
 
         for (entity, hit_entity) in add_hit_entities {
             if let Some(ref mut beam) = beams.get_mut(entity) {

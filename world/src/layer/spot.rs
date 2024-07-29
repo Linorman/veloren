@@ -4,7 +4,7 @@ use crate::{
     Canvas,
 };
 use common::{
-    assets::{Asset, AssetExt, AssetHandle, RonLoader},
+    assets::{Asset, AssetCombined, AssetHandle, Concatenate, RonLoader},
     generation::EntityInfo,
     terrain::{BiomeKind, Structure, TerrainChunkSize},
     vol::RectVolSize,
@@ -24,13 +24,11 @@ use vek::*;
 /// To add a new spot, one must:
 ///
 /// 1. Add a new variant to the [`Spot`] enum.
-///
 /// 2. Add a new entry to [`Spot::generate`] that tells the system where to
-/// generate your new spot.
-///
+///    generate your new spot.
 /// 3. Add a new arm to the `match` expression in [`Spot::apply_spots_to`] that
-/// tells the generator how to generate a spot, including the base structure
-/// that composes the spot and the entities that should be spawned there.
+///    tells the generator how to generate a spot, including the base structure
+///    that composes the spot and the entities that should be spawned there.
 ///
 /// Only add spots with randomly spawned NPCs here. Spots that only use
 /// EntitySpawner blocks can be added in assets/world/manifests/spots.ron
@@ -543,7 +541,7 @@ pub fn apply_spots_to(canvas: &mut Canvas, _dynamic_rng: &mut impl Rng) {
             Spot::Arch => SpotConfig {
                 base_structures: Some("spots.arch"),
                 entity_radius: 50.0,
-                entities: &[(2..3, "common.entity.wild.aggressive.ngoubou")],
+                entities: &[],
             },
             Spot::AirshipCrash => SpotConfig {
                 base_structures: Some("trees.airship_crash"),
@@ -686,9 +684,14 @@ impl Asset for RonSpots {
     const EXTENSION: &'static str = "ron";
 }
 
+impl Concatenate for RonSpots {
+    fn concatenate(self, b: Self) -> Self { Self(self.0.concatenate(b.0)) }
+}
+
 lazy_static! {
     static ref RON_PROPERTIES: RonSpots = {
-        let spots: AssetHandle<RonSpots> = AssetExt::load_expect("world.manifests.spots");
+        let spots: AssetHandle<RonSpots> =
+            RonSpots::load_expect_combined_static("world.manifests.spots");
         RonSpots(spots.read().0.to_vec())
     };
 }

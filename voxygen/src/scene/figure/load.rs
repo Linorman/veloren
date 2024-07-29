@@ -205,6 +205,7 @@ struct ArmorVoxSpec {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 enum ModularComponentSpec {
     /// item id, offset from origin to mount point
     Damage((String, [i32; 3])),
@@ -421,9 +422,6 @@ impl_concatenate_for_wrapper!(HumArmorFootSpec);
 #[derive(Deserialize)]
 struct HumMainWeaponSpec(HashMap<ToolKey, ArmorVoxSpec>);
 impl_concatenate_for_wrapper!(HumMainWeaponSpec);
-#[derive(Deserialize)]
-struct HumModularComponentSpec(HashMap<String, ModularComponentSpec>);
-impl_concatenate_for_wrapper!(HumModularComponentSpec);
 #[derive(Deserialize)]
 struct HumArmorLanternSpec(ArmorVoxSpecMap<String, ArmorVoxSpec>);
 impl_concatenate_for_wrapper!(HumArmorLanternSpec);
@@ -5664,14 +5662,11 @@ impl ItemDropCentralSpec {
             (segment, match item_drop {
                 // TODO: apply non-random rotations to items here
                 item_drop::Body::Tool(_) => Vec3::new(offset.x - 2.0, offset.y, offset.z),
-                item_drop::Body::Armor(kind) => match kind {
+                item_drop::Body::Armor(
                     item_drop::ItemDropArmorKind::Neck
                     | item_drop::ItemDropArmorKind::Back
-                    | item_drop::ItemDropArmorKind::Tabard => {
-                        Vec3::new(offset.x, offset.y - 2.0, offset.z)
-                    },
-                    _ => offset * Vec3::new(1.0, 1.0, 0.0),
-                },
+                    | item_drop::ItemDropArmorKind::Tabard,
+                ) => Vec3::new(offset.x, offset.y - 2.0, offset.z),
                 _ => offset * Vec3::new(1.0, 1.0, 0.0),
             })
         } else {

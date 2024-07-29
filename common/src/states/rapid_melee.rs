@@ -1,7 +1,7 @@
 use crate::{
     combat,
     comp::{character_state::OutputEvents, CharacterState, MeleeConstructor, StateUpdate},
-    event::ServerEvent,
+    event::ComboChangeEvent,
     states::{
         behavior::{CharacterBehavior, JoinData},
         utils::*,
@@ -117,7 +117,7 @@ impl CharacterBehavior for Data {
 
                 // Consume combo if any was required
                 if self.static_data.minimum_combo > 0 {
-                    output_events.emit_server(ServerEvent::ComboChange {
+                    output_events.emit_server(ComboChangeEvent {
                         entity: data.entity,
                         change: -data.combo.map_or(0, |c| c.counter() as i32),
                     });
@@ -127,7 +127,11 @@ impl CharacterBehavior for Data {
                 if self.timer < self.static_data.recover_duration {
                     // Recover
                     if let CharacterState::RapidMelee(c) = &mut update.character {
-                        c.timer = tick_attack_or_default(data, self.timer, None);
+                        c.timer = tick_attack_or_default(
+                            data,
+                            self.timer,
+                            Some(data.stats.recovery_speed_modifier),
+                        );
                     }
                 } else {
                     // Done

@@ -60,6 +60,7 @@ pub enum Message {
     },
     /// Loads up the chunks at map center and adds a entity that mimics a
     /// player to keep them from despawning
+    #[cfg(feature = "worldgen")]
     LoadArea {
         /// View distance of the loaded area
         view_distance: u32,
@@ -71,6 +72,19 @@ pub enum Message {
     },
     /// Disconnects all connected clients
     DisconnectAllClients,
+    /// returns active player names
+    ListPlayers,
+    ListLogs,
+    /// sends a msg to everyone on the server
+    SendGlobalMsg {
+        msg: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum MessageReturn {
+    Players(Vec<String>),
+    Logs(Vec<String>),
 }
 
 #[derive(Parser)]

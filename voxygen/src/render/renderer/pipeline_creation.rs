@@ -6,15 +6,15 @@ use super::{
             blit, bloom, clouds, debug, figure, fluid, lod_object, lod_terrain, particle,
             postprocess, rope, shadow, skybox, sprite, terrain, trail, ui,
         },
-        AaMode, BloomMode, CloudMode, FluidMode, LightingMode, PipelineModes, ReflectionMode,
-        RenderError, ShadowMode,
+        AaMode, BloomMode, CloudMode, ExperimentalShader, FluidMode, LightingMode, PipelineModes,
+        ReflectionMode, RenderError, ShadowMode,
     },
     shaders::Shaders,
     ImmutableLayouts, Layouts,
 };
 use common_base::{prof_span, prof_span_alloc};
 use std::sync::Arc;
-use tracing::warn;
+use tracing::info;
 
 /// All the pipelines
 pub struct Pipelines {
@@ -283,8 +283,18 @@ impl ShaderModules {
 
         let mut compiler = Compiler::new().ok_or(RenderError::ErrorInitializingCompiler)?;
         let mut options = CompileOptions::new().ok_or(RenderError::ErrorInitializingCompiler)?;
-        options.set_optimization_level(OptimizationLevel::Performance);
+        let shaderc_opts = pipeline_modes
+            .experimental_shaders
+            .contains(&ExperimentalShader::EnableShadercOptimization);
+        if shaderc_opts {
+            options.set_optimization_level(OptimizationLevel::Performance);
+            info!("Enabled optimization by shaderc.");
+        } else {
+            options.set_optimization_level(OptimizationLevel::Zero);
+            info!("Disabled optimization by shaderc.");
+        }
         options.set_forced_version_profile(430, shaderc::GlslProfile::Core);
+        // options.set_generate_debug_info();
         options.set_include_callback(move |name, _, shader_name, _| {
             Ok(ResolvedInclude {
                 resolved_name: name.to_string(),
@@ -409,20 +419,27 @@ fn create_shader_module(
         .compile_into_spirv(source, kind, file_name, "main", Some(options))
         .map_err(|e| (file_name, e))?;
 
-    if spv.get_num_warnings() > 0 {
-        warn!(
-            "shaderc emitted compilation warnings for {file_name}:\n\n{}",
-            spv.get_warning_messages()
-        );
-    }
+    // Uncomment me to dump shaders to files
+    //
+    // std::fs::create_dir_all("dumpped-shaders").expect("Couldn't create shader
+    // dumps folders");
+    //
+    // let mut file = std::fs::File::create(format!("dumpped-shaders/{}.spv",
+    // file_name))     .expect("Couldn't open shader out");
+    //
+    // use std::io::Write;
+    //
+    // file.write(spv.as_binary_u8())
+    //     .expect("Couldn't write shader out");
 
-    let label = [file_name, "\n\n", source].concat();
-    Ok(device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-        label: Some(&label),
-        source: wgpu::ShaderSource::SpirV(Cow::Borrowed(spv.as_binary())),
-        flags: wgpu::ShaderFlags::empty(),
-        // TODO: renable // flags: wgpu::ShaderFlags::VALIDATION,
-    }))
+    // let label = [file_name, "\n\n", source].concat();
+    #[allow(unsafe_code)]
+    Ok(unsafe {
+        device.create_shader_module_unchecked(wgpu::ShaderModuleDescriptor {
+            label: Some(file_name),
+            source: wgpu::ShaderSource::SpirV(Cow::Borrowed(spv.as_binary())),
+        })
+    })
 }
 
 /// Things needed to create a pipeline
@@ -432,7 +449,7 @@ struct PipelineNeeds<'a> {
     layouts: &'a Layouts,
     shaders: &'a ShaderModules,
     pipeline_modes: &'a PipelineModes,
-    sc_desc: &'a wgpu::SwapChainDescriptor,
+    surface_config: &'a wgpu::SurfaceConfiguration,
 }
 
 /// Creates InterfacePipelines in parallel
@@ -452,7 +469,7 @@ fn create_interface_pipelines(
                     needs.device,
                     &needs.shaders.ui_vert,
                     &needs.shaders.ui_frag,
-                    needs.sc_desc,
+                    needs.surface_config,
                     &needs.layouts.global,
                     &needs.layouts.ui,
                 )
@@ -483,7 +500,7 @@ fn create_interface_pipelines(
                     needs.device,
                     &needs.shaders.blit_vert,
                     &needs.shaders.blit_frag,
-                    needs.sc_desc,
+                    needs.surface_config,
                     &needs.layouts.blit,
                 )
             },
@@ -508,6 +525,7 @@ fn create_ingame_and_shadow_pipelines(
     pool: &rayon::ThreadPool,
     // TODO: Reduce the boilerplate in this file
     tasks: [Task; 20],
+    format: wgpu::TextureFormat,
 ) -> IngameAndShadowPipelines {
     prof_span!(_guard, "create_ingame_and_shadow_pipelines");
 
@@ -516,7 +534,7 @@ fn create_ingame_and_shadow_pipelines(
         layouts,
         shaders,
         pipeline_modes,
-        sc_desc,
+        surface_config: sc_desc,
     } = needs;
 
     let [
@@ -558,6 +576,7 @@ fn create_ingame_and_shadow_pipelines(
                     &layouts.global,
                     &layouts.debug,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "debug pipeline creation",
@@ -573,6 +592,7 @@ fn create_ingame_and_shadow_pipelines(
                     &shaders.skybox_frag,
                     &layouts.global,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "skybox pipeline creation",
@@ -589,6 +609,7 @@ fn create_ingame_and_shadow_pipelines(
                     &layouts.global,
                     &layouts.figure,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "figure pipeline creation",
@@ -605,6 +626,7 @@ fn create_ingame_and_shadow_pipelines(
                     &layouts.global,
                     &layouts.terrain,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "terrain pipeline creation",
@@ -621,6 +643,7 @@ fn create_ingame_and_shadow_pipelines(
                     &layouts.global,
                     &layouts.terrain,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "fluid pipeline creation",
@@ -638,6 +661,7 @@ fn create_ingame_and_shadow_pipelines(
                     &layouts.sprite,
                     &layouts.terrain,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "sprite pipeline creation",
@@ -653,6 +677,7 @@ fn create_ingame_and_shadow_pipelines(
                     &shaders.lod_object_frag,
                     &layouts.global,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "lod object pipeline creation",
@@ -668,6 +693,7 @@ fn create_ingame_and_shadow_pipelines(
                     &shaders.particle_frag,
                     &layouts.global,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "particle pipeline creation",
@@ -684,6 +710,7 @@ fn create_ingame_and_shadow_pipelines(
                     &layouts.global,
                     &layouts.rope,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "rope pipeline creation",
@@ -699,6 +726,7 @@ fn create_ingame_and_shadow_pipelines(
                     &shaders.trail_frag,
                     &layouts.global,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "trail pipeline creation",
@@ -714,6 +742,7 @@ fn create_ingame_and_shadow_pipelines(
                     &shaders.lod_terrain_frag,
                     &layouts.global,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "lod terrain pipeline creation",
@@ -730,6 +759,7 @@ fn create_ingame_and_shadow_pipelines(
                     &layouts.global,
                     &layouts.clouds,
                     pipeline_modes.aa,
+                    format,
                 )
             },
             "clouds pipeline creation",
@@ -750,7 +780,7 @@ fn create_ingame_and_shadow_pipelines(
                         &shaders.dual_downsample_filtered_frag,
                         &shaders.dual_downsample_frag,
                         &shaders.dual_upsample_frag,
-                        wgpu::TextureFormat::Rgba16Float,
+                        format,
                         &layouts.bloom,
                         bloom_config,
                     )
@@ -974,8 +1004,9 @@ pub(super) fn initial_create_pipelines(
     layouts: Layouts,
     shaders: Shaders,
     pipeline_modes: PipelineModes,
-    sc_desc: wgpu::SwapChainDescriptor,
+    surface_config: wgpu::SurfaceConfiguration,
     has_shadow_views: bool,
+    intermediate_format: wgpu::TextureFormat,
 ) -> Result<
     (
         InterfacePipelines,
@@ -999,7 +1030,7 @@ pub(super) fn initial_create_pipelines(
         layouts: &layouts,
         shaders: &shader_modules,
         pipeline_modes: &pipeline_modes,
-        sc_desc: &sc_desc,
+        surface_config: &surface_config,
     };
 
     // Create interface pipelines while blocking the main thread
@@ -1026,10 +1057,15 @@ pub(super) fn initial_create_pipelines(
             layouts: &layouts,
             shaders: &shader_modules,
             pipeline_modes: &pipeline_modes,
-            sc_desc: &sc_desc,
+            surface_config: &surface_config,
         };
 
-        let pipelines = create_ingame_and_shadow_pipelines(needs, pool, progress.create_tasks());
+        let pipelines = create_ingame_and_shadow_pipelines(
+            needs,
+            pool,
+            progress.create_tasks(),
+            intermediate_format,
+        );
 
         pipeline_send.send(pipelines).expect("Channel disconnected");
     });
@@ -1046,8 +1082,9 @@ pub(super) fn recreate_pipelines(
     immutable_layouts: Arc<ImmutableLayouts>,
     shaders: Shaders,
     pipeline_modes: PipelineModes,
-    sc_desc: wgpu::SwapChainDescriptor,
+    surface_config: wgpu::SurfaceConfiguration,
     has_shadow_views: bool,
+    intermediate_format: wgpu::TextureFormat,
 ) -> PipelineCreation<
     Result<
         (
@@ -1112,7 +1149,7 @@ pub(super) fn recreate_pipelines(
             layouts: &layouts,
             shaders: &shader_modules,
             pipeline_modes: &pipeline_modes,
-            sc_desc: &sc_desc,
+            surface_config: &surface_config,
         };
 
         // Create interface pipelines
@@ -1123,7 +1160,12 @@ pub(super) fn recreate_pipelines(
             ingame,
             shadow,
             rain_occlusion,
-        } = create_ingame_and_shadow_pipelines(needs, pool, ingame_and_shadow_tasks);
+        } = create_ingame_and_shadow_pipelines(
+            needs,
+            pool,
+            ingame_and_shadow_tasks,
+            intermediate_format,
+        );
 
         // Send them
         result_send

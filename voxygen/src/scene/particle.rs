@@ -15,7 +15,8 @@ use common::{
         item::Reagent,
         object,
         shockwave::{self, ShockwaveDodgeable},
-        Beam, Body, CharacterActivity, CharacterState, Ori, Pos, Scale, Shockwave, Vel,
+        Beam, Body, CharacterActivity, CharacterState, Fluid, Ori, PhysicsState, Pos, Scale,
+        Shockwave, Vel,
     },
     figure::Segment,
     outcome::Outcome,
@@ -350,6 +351,16 @@ impl ParticleMgr {
                     )
                 });
             },
+            Outcome::SurpriseEgg { pos, .. } => {
+                self.particles.resize_with(self.particles.len() + 50, || {
+                    Particle::new(
+                        Duration::from_millis(1000),
+                        time,
+                        ParticleMode::SurpriseEgg,
+                        *pos,
+                    )
+                });
+            },
             Outcome::FlashFreeze { pos, .. } => {
                 self.particles.resize_with(
                     self.particles.len()
@@ -386,13 +397,22 @@ impl ParticleMgr {
                     *pos + Vec3::new(0.0, 0.0, 5.6 + 0.5 * rng.gen_range(0.0..0.2)),
                 ));
             },
-            Outcome::FlamethrowerCharge { pos } => {
+            Outcome::FlamethrowerCharge { pos } | Outcome::FuseCharge { pos } => {
                 self.particles.push(Particle::new_directed(
                     Duration::from_secs_f32(rng.gen_range(0.1..0.2)),
                     time,
                     ParticleMode::CampfireFire,
                     *pos + Vec3::new(0.0, 0.0, 1.2),
                     *pos + Vec3::new(0.0, 0.0, 1.5 + 0.5 * rng.gen_range(0.0..0.2)),
+                ));
+            },
+            Outcome::TerracottaStatueCharge { pos } => {
+                self.particles.push(Particle::new_directed(
+                    Duration::from_secs_f32(rng.gen_range(0.1..0.2)),
+                    time,
+                    ParticleMode::FireworkYellow,
+                    *pos + Vec3::new(0.0, 0.0, 4.0),
+                    *pos + Vec3::new(0.0, 0.0, 5.0 + 0.5 * rng.gen_range(0.3..0.8)),
                 ));
             },
             Outcome::Death { pos, .. } => {
@@ -433,6 +453,16 @@ impl ParticleMgr {
                     )
                 });
             },
+            Outcome::ClayGolemDash { pos, .. } => {
+                self.particles.resize_with(self.particles.len() + 100, || {
+                    Particle::new(
+                        Duration::from_millis(1000),
+                        time,
+                        ParticleMode::ClayShrapnel,
+                        *pos,
+                    )
+                });
+            },
             Outcome::ProjectileShot { .. }
             | Outcome::Beam { .. }
             | Outcome::ExpChange { .. }
@@ -446,6 +476,9 @@ impl ParticleMgr {
             | Outcome::Glider { .. }
             | Outcome::Whoosh { .. }
             | Outcome::Swoosh { .. }
+            | Outcome::Slash { .. }
+            | Outcome::Bleep { .. }
+            | Outcome::Charge { .. }
             | Outcome::Steam { .. }
             | Outcome::FireShockwave { .. }
             | Outcome::PortalActivated { .. }
@@ -542,7 +575,8 @@ impl ParticleMgr {
                     | object::Body::FireworkPurple
                     | object::Body::FireworkRed
                     | object::Body::FireworkWhite
-                    | object::Body::FireworkYellow,
+                    | object::Body::FireworkYellow
+                    | object::Body::IronPikeBomb,
                 ) => self.maintain_bomb_particles(scene_data, interpolated.pos, vel),
                 Body::Object(object::Body::PortalActive) => {
                     self.maintain_active_portal_particles(scene_data, interpolated.pos)
@@ -905,16 +939,18 @@ impl ParticleMgr {
         let dt = scene_data.state.get_delta_time();
         let mut rng = thread_rng();
 
-        for (entity, interpolated, vel, character_state, body, ori, character_activity) in (
-            &ecs.entities(),
-            &ecs.read_storage::<Interpolated>(),
-            ecs.read_storage::<Vel>().maybe(),
-            &ecs.read_storage::<CharacterState>(),
-            &ecs.read_storage::<Body>(),
-            &ecs.read_storage::<Ori>(),
-            &ecs.read_storage::<CharacterActivity>(),
-        )
-            .join()
+        for (entity, interpolated, vel, character_state, body, ori, character_activity, physics) in
+            (
+                &ecs.entities(),
+                &ecs.read_storage::<Interpolated>(),
+                ecs.read_storage::<Vel>().maybe(),
+                &ecs.read_storage::<CharacterState>(),
+                &ecs.read_storage::<Body>(),
+                &ecs.read_storage::<Ori>(),
+                &ecs.read_storage::<CharacterActivity>(),
+                &ecs.read_storage::<PhysicsState>(),
+            )
+                .join()
         {
             match character_state {
                 CharacterState::Boost(_) => {
@@ -923,14 +959,45 @@ impl ParticleMgr {
                             + usize::from(self.scheduler.heartbeats(Duration::from_millis(10))),
                         || {
                             Particle::new(
-                                Duration::from_secs(15),
+                                Duration::from_millis(250),
                                 time,
-                                ParticleMode::CampfireSmoke,
+                                ParticleMode::PortalFizz,
+                                // Output particles from broom, not from character ass
                                 interpolated.pos
-                                    + vel.map_or(Vec3::zero(), |v| -v.0 * dt * rng.gen::<f32>()),
+                                    - ori.to_horizontal().look_dir().to_vec()
+                                    - vel.map_or(Vec3::zero(), |v| v.0 * dt * rng.gen::<f32>()),
                             )
                         },
                     );
+                },
+                CharacterState::BasicMelee(c) => {
+                    if let Some(specifier) = c.static_data.frontend_specifier {
+                        match specifier {
+                            states::basic_melee::FrontendSpecifier::FlameTornado => {
+                                if matches!(c.stage_section, StageSection::Action) {
+                                    let time = scene_data.state.get_time();
+                                    let mut rng = thread_rng();
+                                    self.particles.resize_with(
+                                        self.particles.len()
+                                            + 10
+                                            + usize::from(
+                                                self.scheduler.heartbeats(Duration::from_millis(5)),
+                                            ),
+                                        || {
+                                            Particle::new(
+                                                Duration::from_millis(1000),
+                                                time,
+                                                ParticleMode::FlameTornado,
+                                                interpolated
+                                                    .pos
+                                                    .map(|e| e + rng.gen_range(-0.25..0.25)),
+                                            )
+                                        },
+                                    );
+                                }
+                            },
+                        }
+                    }
                 },
                 CharacterState::RapidMelee(c) => {
                     if let Some(specifier) = c.static_data.frontend_specifier {
@@ -1116,38 +1183,82 @@ impl ParticleMgr {
                     }
                 },
                 CharacterState::Blink(c) => {
-                    self.particles.resize_with(
-                        self.particles.len()
-                            + usize::from(self.scheduler.heartbeats(Duration::from_millis(10))),
-                        || {
-                            let center_pos =
-                                interpolated.pos + Vec3::unit_z() * body.height() / 2.0;
-                            let outer_pos = interpolated.pos
-                                + Vec3::new(
-                                    2.0 * rng.gen::<f32>() - 1.0,
-                                    2.0 * rng.gen::<f32>() - 1.0,
-                                    0.0,
-                                )
-                                .normalized()
-                                    * (body.max_radius() + 2.0)
-                                + Vec3::unit_z() * body.height() * rng.gen::<f32>();
+                    if let Some(specifier) = c.static_data.frontend_specifier {
+                        match specifier {
+                            states::blink::FrontendSpecifier::CultistFlame => {
+                                self.particles.resize_with(
+                                    self.particles.len()
+                                        + usize::from(
+                                            self.scheduler.heartbeats(Duration::from_millis(10)),
+                                        ),
+                                    || {
+                                        let center_pos =
+                                            interpolated.pos + Vec3::unit_z() * body.height() / 2.0;
+                                        let outer_pos = interpolated.pos
+                                            + Vec3::new(
+                                                2.0 * rng.gen::<f32>() - 1.0,
+                                                2.0 * rng.gen::<f32>() - 1.0,
+                                                0.0,
+                                            )
+                                            .normalized()
+                                                * (body.max_radius() + 2.0)
+                                            + Vec3::unit_z() * body.height() * rng.gen::<f32>();
 
-                            let (start_pos, end_pos) =
-                                if matches!(c.stage_section, StageSection::Buildup) {
-                                    (outer_pos, center_pos)
-                                } else {
-                                    (center_pos, outer_pos)
-                                };
+                                        let (start_pos, end_pos) =
+                                            if matches!(c.stage_section, StageSection::Buildup) {
+                                                (outer_pos, center_pos)
+                                            } else {
+                                                (center_pos, outer_pos)
+                                            };
 
-                            Particle::new_directed(
-                                Duration::from_secs_f32(0.5),
-                                time,
-                                ParticleMode::CultistFlame,
-                                start_pos,
-                                end_pos,
-                            )
-                        },
-                    );
+                                        Particle::new_directed(
+                                            Duration::from_secs_f32(0.5),
+                                            time,
+                                            ParticleMode::CultistFlame,
+                                            start_pos,
+                                            end_pos,
+                                        )
+                                    },
+                                );
+                            },
+                            states::blink::FrontendSpecifier::FlameThrower => {
+                                self.particles.resize_with(
+                                    self.particles.len()
+                                        + usize::from(
+                                            self.scheduler.heartbeats(Duration::from_millis(10)),
+                                        ),
+                                    || {
+                                        let center_pos =
+                                            interpolated.pos + Vec3::unit_z() * body.height() / 2.0;
+                                        let outer_pos = interpolated.pos
+                                            + Vec3::new(
+                                                2.0 * rng.gen::<f32>() - 1.0,
+                                                2.0 * rng.gen::<f32>() - 1.0,
+                                                0.0,
+                                            )
+                                            .normalized()
+                                                * (body.max_radius() + 2.0)
+                                            + Vec3::unit_z() * body.height() * rng.gen::<f32>();
+
+                                        let (start_pos, end_pos) =
+                                            if matches!(c.stage_section, StageSection::Buildup) {
+                                                (outer_pos, center_pos)
+                                            } else {
+                                                (center_pos, outer_pos)
+                                            };
+
+                                        Particle::new_directed(
+                                            Duration::from_secs_f32(0.5),
+                                            time,
+                                            ParticleMode::FlameThrower,
+                                            start_pos,
+                                            end_pos,
+                                        )
+                                    },
+                                );
+                            },
+                        }
+                    }
                 },
                 CharacterState::SelfBuff(c) => {
                     if let Some(specifier) = c.static_data.specifier {
@@ -1306,6 +1417,117 @@ impl ParticleMgr {
                         );
                     }
                 },
+                CharacterState::Glide(_) => {
+                    if let Some(Fluid::Air {
+                        vel: air_vel,
+                        elevation: _,
+                    }) = physics.in_fluid
+                    {
+                        // Empirical observation is that air_vel is somewhere
+                        // between 0.0 and 13.0, but we are extending to be sure
+                        const MAX_AIR_VEL: f32 = 15.0;
+                        const MIN_AIR_VEL: f32 = -2.0;
+
+                        let minmax_norm = |val, min, max| (val - min) / (max - min);
+
+                        let wind_speed = air_vel.0.magnitude();
+
+                        // Less means more frequent particles
+                        let heartbeat = 200
+                            - Lerp::lerp(
+                                50u64,
+                                150,
+                                minmax_norm(wind_speed, MIN_AIR_VEL, MAX_AIR_VEL),
+                            );
+
+                        let new_count = self.particles.len()
+                            + usize::from(
+                                self.scheduler.heartbeats(Duration::from_millis(heartbeat)),
+                            );
+
+                        // More number, longer particles
+                        let duration = Lerp::lerp(
+                            0u64,
+                            1000,
+                            minmax_norm(wind_speed, MIN_AIR_VEL, MAX_AIR_VEL),
+                        );
+                        let duration = Duration::from_millis(duration);
+
+                        self.particles.resize_with(new_count, || {
+                            let start_pos = interpolated.pos
+                                + Vec3::new(
+                                    body.max_radius(),
+                                    body.max_radius(),
+                                    body.height() / 2.0,
+                                )
+                                .map(|d| d * rng.gen_range(-10.0..10.0));
+
+                            Particle::new_directed(
+                                duration,
+                                time,
+                                ParticleMode::Airflow,
+                                start_pos,
+                                start_pos + air_vel.0,
+                            )
+                        });
+                    }
+                },
+                CharacterState::Transform(data) => {
+                    if matches!(data.stage_section, StageSection::Buildup)
+                        && let Some(specifier) = data.static_data.specifier
+                    {
+                        match specifier {
+                            states::transform::FrontendSpecifier::Evolve => {
+                                self.particles.resize_with(
+                                    self.particles.len()
+                                        + usize::from(
+                                            self.scheduler.heartbeats(Duration::from_millis(10)),
+                                        ),
+                                    || {
+                                        let start_pos = interpolated.pos
+                                            + (Vec2::unit_y()
+                                                * rng.gen::<f32>()
+                                                * body.max_radius())
+                                            .rotated_z(rng.gen_range(0.0..(PI * 2.0)))
+                                            .with_z(body.height() * rng.gen::<f32>());
+
+                                        Particle::new_directed(
+                                            Duration::from_millis(100),
+                                            time,
+                                            ParticleMode::BarrelOrgan,
+                                            start_pos,
+                                            start_pos + Vec3::unit_z() * 2.0,
+                                        )
+                                    },
+                                )
+                            },
+                            states::transform::FrontendSpecifier::Cursekeeper => {
+                                self.particles.resize_with(
+                                    self.particles.len()
+                                        + usize::from(
+                                            self.scheduler.heartbeats(Duration::from_millis(10)),
+                                        ),
+                                    || {
+                                        let start_pos = interpolated.pos
+                                            + (Vec2::unit_y()
+                                                * rng.gen::<f32>()
+                                                * body.max_radius())
+                                            .rotated_z(rng.gen_range(0.0..(PI * 2.0)))
+                                            .with_z(body.height() * rng.gen::<f32>());
+
+                                        Particle::new_directed(
+                                            Duration::from_millis(100),
+                                            time,
+                                            ParticleMode::FireworkPurple,
+                                            start_pos,
+                                            start_pos + Vec3::unit_z() * 2.0,
+                                        )
+                                    },
+                                )
+                            },
+                        }
+                    }
+                },
                 _ => {},
             }
         }
@@ -1411,13 +1633,13 @@ impl ParticleMgr {
                         ));
                     }
                 },
-                beam::FrontendSpecifier::ClayGolem => {
+                beam::FrontendSpecifier::Gravewarden => {
                     self.particles.resize_with(self.particles.len() + 2, || {
                         Particle::new_directed(
                             Duration::from_secs_f64(beam.duration.0),
                             time,
                             ParticleMode::Laser,
-                            beam.bezier.start,
+                            beam.bezier.start + beam_dir * 1.5,
                             beam.bezier.start + beam_dir * beam.range,
                         )
                     })
@@ -1672,11 +1894,11 @@ impl ParticleMgr {
                         kind: buff::BuffKind::Burning,
                         ..
                     } => {
-                        let num_particles = aura.radius.powi(2) * dt / 250.0;
-                        let num_particles = num_particles.floor() as usize
-                            + usize::from(rng.gen_bool(f64::from(num_particles % 1.0)));
-                        self.particles
-                            .resize_with(self.particles.len() + num_particles, || {
+                        let heartbeats = self.scheduler.heartbeats(Duration::from_millis(5));
+                        self.particles.resize_with(
+                            self.particles.len()
+                                + aura.radius.powi(2) as usize * usize::from(heartbeats) / 300,
+                            || {
                                 let rand_pos = {
                                     let theta = rng.gen::<f32>() * TAU;
                                     let radius = aura.radius * rng.gen::<f32>().sqrt();
@@ -1696,7 +1918,8 @@ impl ParticleMgr {
                                     rand_pos.with_z(pos.z),
                                     rand_pos.with_z(pos.z + 1.0),
                                 )
-                            });
+                            },
+                        );
                     },
                     aura::AuraKind::Buff {
                         kind: buff::BuffKind::Hastened,
@@ -1749,8 +1972,8 @@ impl ParticleMgr {
                                         Duration::from_secs(3),
                                         time,
                                         ParticleMode::Ice,
-                                        pos.x + Vec3::unit_z() * z_start,
-                                        pos.x + offset.with_z(z_end),
+                                        pos + Vec3::unit_z() * z_start,
+                                        pos + offset.with_z(z_end),
                                     )
                                 },
                             );
@@ -2106,6 +2329,14 @@ impl ParticleMgr {
                 rate: 12.0,
                 lifetime: 1.5,
                 mode: ParticleMode::PortalFizz,
+                cond: |_| true,
+            },
+            BlockParticles {
+                blocks: |boi| BlockParticleSlice::Positions(&boi.spores),
+                range: 4,
+                rate: 0.055,
+                lifetime: 20.0,
+                mode: ParticleMode::Spore,
                 cond: |_| true,
             },
         ];
@@ -2784,7 +3015,7 @@ struct HeartbeatScheduler {
     /// - if it's more frequent then tick rate, it could be 1 or more.
     /// - if it's less frequent then tick rate, it could be 1 or 0.
     /// - if it's equal to the tick rate, it could be between 2 and 0, due to
-    /// delta time variance etc.
+    ///   delta time variance etc.
     timers: HashMap<Duration, (f64, u8)>,
 
     last_known_time: f64,
@@ -2828,10 +3059,10 @@ impl HeartbeatScheduler {
 
     /// returns the number of times this duration has elapsed since the last
     /// tick:
-    /// - if it's more frequent then tick rate, it could be 1 or more.
-    /// - if it's less frequent then tick rate, it could be 1 or 0.
-    /// - if it's equal to the tick rate, it could be between 2 and 0, due to
-    /// delta time variance.
+    ///   - if it's more frequent then tick rate, it could be 1 or more.
+    ///   - if it's less frequent then tick rate, it could be 1 or 0.
+    ///   - if it's equal to the tick rate, it could be between 2 and 0, due to
+    ///     delta time variance.
     pub fn heartbeats(&mut self, frequency: Duration) -> u8 {
         span!(_guard, "HeartbeatScheduler::heartbeats");
         let last_known_time = self.last_known_time;

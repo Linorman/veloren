@@ -10,7 +10,7 @@ use client::Client;
 use common::{
     comp,
     comp::{ship::figuredata::VOXEL_COLLIDER_MANIFEST, tool::ToolKind, Collider, Content},
-    consts::{MAX_PICKUP_RANGE, MAX_SPRITE_MOUNT_RANGE, TELEPORTER_RADIUS},
+    consts::{MAX_INTERACT_RANGE, MAX_PICKUP_RANGE, MAX_SPRITE_MOUNT_RANGE, TELEPORTER_RADIUS},
     link::Is,
     mounting::{Mount, Rider, VolumePos, VolumeRider},
     terrain::{Block, TerrainGrid, UnlockKind},
@@ -36,6 +36,7 @@ pub enum BlockInteraction {
     Mine(ToolKind),
     Mount,
     Read(Content),
+    LightToggle(bool),
 }
 
 #[derive(Clone, Debug)]
@@ -105,6 +106,7 @@ impl Interactable {
             },
             Interaction::Craft(tab) => BlockInteraction::Craft(tab),
             Interaction::Mount => BlockInteraction::Mount,
+            Interaction::LightToggle(enable) => BlockInteraction::LightToggle(enable),
         };
         Some(Self::Block(block, volume_pos, block_interaction))
     }
@@ -114,11 +116,14 @@ impl Interactable {
 /// interact with if the interact key is pressed
 /// Selected in the following order:
 /// 1) Targeted items, in order of nearest under cursor:
-///   a) entity (if within range)
-///   b) collectable
-///   c) can be mined, and is a mine sprite (Air) not a weak rock.
+///
+///    a) entity (if within range)
+///    b) collectable
+///    c) can be mined, and is a mine sprite (Air) not a weak rock.
+///
 /// 2) outside of targeted cam ray
-///   -> closest of nearest interactable entity/block
+///
+///    -> closest of nearest interactable entity/block
 pub(super) fn select_interactable(
     client: &Client,
     collect_target: Option<Target<target::Collectable>>,
@@ -171,7 +176,9 @@ pub(super) fn select_interactable(
                         // interactable. We are only returning the mineable air
                         // elements (e.g. minerals). The mineable weakrock are used
                         // in the terrain selected_pos, but is not an interactable.
-                        if let Some(mine_tool) = b.mine_tool() && b.is_air() {
+                        if let Some(mine_tool) = b.mine_tool()
+                            && b.is_air()
+                        {
                             Some(Interactable::Block(
                                 b,
                                 VolumePos::terrain(t.position_int()),
@@ -203,7 +210,7 @@ pub(super) fn select_interactable(
         let is_mounts = ecs.read_storage::<Is<Mount>>();
         let is_riders = ecs.read_storage::<Is<Rider>>();
         let bodies = ecs.read_storage::<comp::Body>();
-        let items = ecs.read_storage::<comp::Item>();
+        let items = ecs.read_storage::<comp::PickupItem>();
         let stats = ecs.read_storage::<comp::Stats>();
 
         let player_char_state = char_states.get(player_entity);
@@ -341,8 +348,9 @@ pub(super) fn select_interactable(
             .filter(|(wpos, volume_pos, interaction)| {
                 match interaction {
                     Interaction::Mount => !is_volume_rider.contains(player_entity)
-                    && wpos.distance_squared(player_pos) < MAX_SPRITE_MOUNT_RANGE * MAX_SPRITE_MOUNT_RANGE
-                    && !is_volume_rider.join().any(|is_volume_rider| is_volume_rider.pos == *volume_pos),
+                        && wpos.distance_squared(player_pos) < MAX_SPRITE_MOUNT_RANGE.powi(2)
+                        && !is_volume_rider.join().any(|is_volume_rider| is_volume_rider.pos == *volume_pos),
+                    Interaction::LightToggle(_) => wpos.distance_squared(player_pos) < MAX_INTERACT_RANGE.powi(2),
                     _ => true,
                 }
             })

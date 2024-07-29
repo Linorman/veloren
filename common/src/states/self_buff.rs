@@ -1,10 +1,10 @@
 use crate::{
     comp::{
-        buff::{Buff, BuffCategory, BuffChange, BuffData, BuffKind, BuffSource},
+        buff::{Buff, BuffCategory, BuffChange, BuffData, BuffKind, BuffSource, DestInfo},
         character_state::OutputEvents,
         CharacterState, StateUpdate,
     },
-    event::{LocalEvent, ServerEvent},
+    event::{BuffEvent, ComboChangeEvent, LocalEvent},
     outcome::Outcome,
     resources::Secs,
     states::{
@@ -79,7 +79,7 @@ impl CharacterBehavior for Data {
                     } else {
                         self.static_data.combo_cost
                     };
-                    output_events.emit_server(ServerEvent::ComboChange {
+                    output_events.emit_server(ComboChangeEvent {
                         entity: data.entity,
                         change: -(combo_consumption as i32),
                     });
@@ -95,7 +95,7 @@ impl CharacterBehavior for Data {
                         .static_data
                         .ability_info
                         .ability
-                        .map_or(false, |a| a.ability.is_from_tool())
+                        .map_or(false, |a| a.ability.is_from_wielded())
                     {
                         vec![BuffCategory::RemoveOnLoadoutChange]
                     } else {
@@ -106,7 +106,7 @@ impl CharacterBehavior for Data {
                     if self.static_data.enforced_limit {
                         buff_cat_ids.push(BuffCategory::SelfBuff);
 
-                        output_events.emit_server(ServerEvent::Buff {
+                        output_events.emit_server(BuffEvent {
                             entity: data.entity,
                             buff_change: BuffChange::RemoveByCategory {
                                 all_required: vec![BuffCategory::SelfBuff],
@@ -115,6 +115,11 @@ impl CharacterBehavior for Data {
                             },
                         });
                     }
+
+                    let dest_info = DestInfo {
+                        stats: Some(data.stats),
+                        mass: Some(data.mass),
+                    };
 
                     // Creates buff
                     let buff = Buff::new(
@@ -126,10 +131,10 @@ impl CharacterBehavior for Data {
                         buff_cat_ids,
                         BuffSource::Character { by: *data.uid },
                         *data.time,
-                        Some(data.stats),
-                        data.health,
+                        dest_info,
+                        Some(data.mass),
                     );
-                    output_events.emit_server(ServerEvent::Buff {
+                    output_events.emit_server(BuffEvent {
                         entity: data.entity,
                         buff_change: BuffChange::Add(buff),
                     });
@@ -165,7 +170,11 @@ impl CharacterBehavior for Data {
             StageSection::Recover => {
                 if self.timer < self.static_data.recover_duration {
                     update.character = CharacterState::SelfBuff(Data {
-                        timer: tick_attack_or_default(data, self.timer, None),
+                        timer: tick_attack_or_default(
+                            data,
+                            self.timer,
+                            Some(data.stats.recovery_speed_modifier),
+                        ),
                         ..*self
                     });
                 } else {

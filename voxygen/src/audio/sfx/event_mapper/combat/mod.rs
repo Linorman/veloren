@@ -124,7 +124,7 @@ impl CombatEventMapper {
     /// Ensures that:
     /// 1. An sfx.ron entry exists for an SFX event
     /// 2. The sfx has not been played since it's timeout threshold has elapsed,
-    /// which prevents firing every tick
+    ///    which prevents firing every tick
     fn should_emit(
         previous_state: &PreviousEntityState,
         sfx_trigger_item: Option<(&SfxEvent, &SfxTriggerItem)>,
@@ -145,7 +145,12 @@ impl CombatEventMapper {
         previous_state: &PreviousEntityState,
         inventory: &Inventory,
     ) -> SfxEvent {
-        if let Some(item) = inventory.equipped(EquipSlot::ActiveMainhand) {
+        let equip_slot = character_state
+            .ability_info()
+            .and_then(|ability| ability.hand)
+            .map_or(EquipSlot::ActiveMainhand, |hand| hand.to_equip_slot());
+
+        if let Some(item) = inventory.equipped(equip_slot) {
             if let ItemKind::Tool(data) = &*item.kind() {
                 if character_state.is_attack() {
                     return SfxEvent::Attack(

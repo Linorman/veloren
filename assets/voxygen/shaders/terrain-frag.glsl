@@ -1,4 +1,4 @@
-#version 430 core
+#version 440 core
 // #extension GL_ARB_texture_storage : require
 
 #include <constants.glsl>
@@ -27,7 +27,6 @@ layout(location = 0) in vec3 f_pos;
 // in vec3 f_chunk_pos;
 // #ifdef FLUID_MODE_SHINY
 layout(location = 1) flat in uint f_pos_norm;
-layout(location = 2) flat in float f_load_time;
 // #else
 // const uint f_pos_norm = 0u;
 // #endif

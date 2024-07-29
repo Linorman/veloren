@@ -4,12 +4,11 @@ use crate::{
         character_state::OutputEvents,
         inventory::loadout_builder::{self, LoadoutBuilder},
         object::Body::FieryTornado,
-        skillset::skills,
         Behavior, BehaviorCapability,
         Body::Object,
         CharacterState, Projectile, StateUpdate,
     },
-    event::{LocalEvent, NpcBuilder, ServerEvent},
+    event::{CreateNpcEvent, LocalEvent, NpcBuilder},
     npc::NPC_NAMES,
     outcome::Outcome,
     skillset_builder::{self, SkillSetBuilder},
@@ -131,14 +130,11 @@ impl CharacterBehavior for Data {
                             body,
                         );
 
-                        let health = self.static_data.summon_info.has_health.then(|| {
-                            let health_level = skill_set
-                                .skill_level(skills::Skill::General(
-                                    skills::GeneralSkill::HealthIncrease,
-                                ))
-                                .unwrap_or(0);
-                            comp::Health::new(body, health_level)
-                        });
+                        let health = self
+                            .static_data
+                            .summon_info
+                            .has_health
+                            .then(|| comp::Health::new(body));
 
                         // Ray cast to check where summon should happen
                         let summon_frac =
@@ -147,7 +143,14 @@ impl CharacterBehavior for Data {
                         let length = rand::thread_rng().gen_range(
                             self.static_data.summon_distance.0..=self.static_data.summon_distance.1,
                         );
-
+                        let extra_height =
+                            if self.static_data.summon_info.body == Object(FieryTornado) {
+                                15.0
+                            } else {
+                                0.0
+                            };
+                        let position =
+                            Vec3::new(data.pos.0.x, data.pos.0.y, data.pos.0.z + extra_height);
                         // Summon in a clockwise fashion
                         let ray_vector = Vec3::new(
                             (summon_frac * 2.0 * PI).sin() * length,
@@ -158,16 +161,16 @@ impl CharacterBehavior for Data {
                         // Check for collision on the xy plane, subtract 1 to get point before block
                         let obstacle_xy = data
                             .terrain
-                            .ray(data.pos.0, data.pos.0 + length * ray_vector)
+                            .ray(position, position + length * ray_vector)
                             .until(Block::is_solid)
                             .cast()
                             .0
                             .sub(1.0);
 
                         let collision_vector = Vec3::new(
-                            data.pos.0.x + (summon_frac * 2.0 * PI).sin() * obstacle_xy,
-                            data.pos.0.y + (summon_frac * 2.0 * PI).cos() * obstacle_xy,
-                            data.pos.0.z + data.body.eye_height(data.scale.map_or(1.0, |s| s.0)),
+                            position.x + (summon_frac * 2.0 * PI).sin() * obstacle_xy,
+                            position.y + (summon_frac * 2.0 * PI).cos() * obstacle_xy,
+                            position.z + data.body.eye_height(data.scale.map_or(1.0, |s| s.0)),
                         );
 
                         // Check for collision in z up to 50 blocks
@@ -188,19 +191,11 @@ impl CharacterBehavior for Data {
                             is_sticky: false,
                             is_point: false,
                         });
-                        let extra_height =
-                            if self.static_data.summon_info.body == Object(FieryTornado) {
-                                5.0
-                            } else {
-                                0.0
-                            };
 
                         let mut rng = rand::thread_rng();
                         // Send server event to create npc
-                        output_events.emit_server(ServerEvent::CreateNpc {
-                            pos: comp::Pos(
-                                collision_vector - Vec3::unit_z() * obstacle_z + extra_height,
-                            ),
+                        output_events.emit_server(CreateNpcEvent {
+                            pos: comp::Pos(collision_vector - Vec3::unit_z() * obstacle_z),
                             ori: comp::Ori::from(Dir::random_2d(&mut rng)),
                             npc: NpcBuilder::new(stats, body, comp::Alignment::Owned(*data.uid))
                                 .with_skill_set(skill_set)
@@ -254,7 +249,11 @@ impl CharacterBehavior for Data {
                 if self.timer < self.static_data.recover_duration {
                     // Recovery
                     update.character = CharacterState::BasicSummon(Data {
-                        timer: tick_attack_or_default(data, self.timer, None),
+                        timer: tick_attack_or_default(
+                            data,
+                            self.timer,
+                            Some(data.stats.recovery_speed_modifier),
+                        ),
                         ..*self
                     });
                 } else {

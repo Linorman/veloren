@@ -114,6 +114,18 @@ make_case_elim!(
         PortalActive = 99,
         FieryTornado = 100,
         FireRainDrop = 101,
+        ArrowClay = 102,
+        GrenadeClay = 103,
+        Pebble = 104,
+        LaserBeamSmall = 105,
+        TerracottaStatue = 106,
+        TerracottaDemolisherBomb = 107,
+        BoltBesieger = 108,
+        SurpriseEgg = 109,
+        BubbleBomb = 110,
+        IronPikeBomb = 111,
+        Lavathrower = 112,
+        Scroll = 113,
     }
 );
 
@@ -124,7 +136,7 @@ impl Body {
     }
 }
 
-pub const ALL_OBJECTS: [Body; 102] = [
+pub const ALL_OBJECTS: [Body; 114] = [
     Body::Arrow,
     Body::Bomb,
     Body::Scarecrow,
@@ -214,9 +226,11 @@ pub const ALL_OBJECTS: [Body; 102] = [
     Body::GnarlingTotemWhite,
     Body::GnarlingTotemGreen,
     Body::DagonBomb,
+    Body::TerracottaDemolisherBomb,
     Body::BarrelOrgan,
     Body::IceBomb,
     Body::LaserBeam,
+    Body::LaserBeamSmall,
     Body::AdletSpear,
     Body::AdletTrap,
     Body::Flamethrower,
@@ -227,6 +241,16 @@ pub const ALL_OBJECTS: [Body; 102] = [
     Body::PortalActive,
     Body::FieryTornado,
     Body::FireRainDrop,
+    Body::ArrowClay,
+    Body::GrenadeClay,
+    Body::Pebble,
+    Body::TerracottaStatue,
+    Body::BoltBesieger,
+    Body::SurpriseEgg,
+    Body::BubbleBomb,
+    Body::IronPikeBomb,
+    Body::Lavathrower,
+    Body::Scroll,
 ];
 
 impl From<Body> for super::Body {
@@ -323,14 +347,17 @@ impl Body {
             Body::GnarlingTotemGreen => "gnarling_totem_green",
             Body::GnarlingTotemWhite => "gnarling_totem_white",
             Body::DagonBomb => "dagon_bomb",
+            Body::TerracottaDemolisherBomb => "terracotta_demolisher_bomb",
             Body::BarrelOrgan => "barrel_organ",
             Body::IceBomb => "ice_bomb",
             Body::SpectralSwordSmall => "spectral_sword_small",
             Body::SpectralSwordLarge => "spectral_sword_large",
             Body::LaserBeam => "laser_beam",
+            Body::LaserBeamSmall => "laser_beam_small",
             Body::AdletSpear => "adlet_spear",
             Body::AdletTrap => "adlet_trap",
             Body::Flamethrower => "flamethrower",
+            Body::Lavathrower => "lavathrower",
             Body::Mine => "mine",
             Body::LightningBolt => "lightning_bolt",
             Body::SpearIcicle => "spear_icicle",
@@ -338,6 +365,15 @@ impl Body {
             Body::PortalActive => "portal_active",
             Body::FieryTornado => "fiery_tornado",
             Body::FireRainDrop => "fire_rain_drop",
+            Body::ArrowClay => "arrow_clay",
+            Body::GrenadeClay => "grenade_clay",
+            Body::Pebble => "pebble",
+            Body::TerracottaStatue => "terracotta_statue",
+            Body::BoltBesieger => "besieger_bolt",
+            Body::SurpriseEgg => "surprise_egg",
+            Body::BubbleBomb => "bubble_bomb",
+            Body::IronPikeBomb => "iron_pike_bomb",
+            Body::Scroll => "recipe",
         }
     }
 
@@ -360,18 +396,25 @@ impl Body {
             | Body::ArrowSnake
             | Body::ArrowTurret
             | Body::MultiArrow
+            | Body::ArrowClay
+            | Body::BoltBesieger
             | Body::Dart
             | Body::DagonBomb
+            | Body::TerracottaDemolisherBomb
             | Body::SpectralSwordSmall
             | Body::SpectralSwordLarge
             | Body::AdletSpear
             | Body::AdletTrap
-            | Body::Flamethrower => 500.0,
-            Body::Bomb | Body::Mine => 2000.0, // I have no idea what it's supposed to be
-            Body::Crate => 300.0,              // a lot of wood and maybe some contents
+            | Body::Flamethrower
+            | Body::Lavathrower => 500.0,
+            Body::Bomb | Body::Mine | Body::SurpriseEgg => 2000.0, /* I have no idea what it's */
+            // supposed to be
+            Body::Crate => 300.0, // a lot of wood and maybe some contents
             Body::Scarecrow => 900.0,
             Body::TrainingDummy => 2000.0,
             Body::Snowball => 0.9 * WATER_DENSITY,
+            Body::Pebble => 1000.0,
+            Body::Scroll => 0.5 * WATER_DENSITY,
             // let them sink
             _ => 1.1 * WATER_DENSITY,
         };
@@ -395,12 +438,19 @@ impl Body {
             | Body::BoltFireBig
             | Body::BoltNature
             | Body::BoltIcicle
-            | Body::FireRainDrop => 1.0,
+            | Body::FireRainDrop
+            | Body::ArrowClay
+            | Body::Pebble
+            | Body::BubbleBomb
+            | Body::IronPikeBomb
+            | Body::BoltBesieger => 1.0,
             Body::SpitPoison => 100.0,
-            Body::Bomb | Body::DagonBomb => {
+            Body::Bomb | Body::DagonBomb | Body::SurpriseEgg | Body::TerracottaDemolisherBomb => {
                 0.5 * IRON_DENSITY * std::f32::consts::PI / 6.0 * self.dimensions().x.powi(3)
             },
-            Body::Campfire | Body::CampfireLit | Body::BarrelOrgan => 300.0,
+            Body::Campfire | Body::CampfireLit | Body::BarrelOrgan | Body::TerracottaStatue => {
+                300.0
+            },
             Body::Carpet
             | Body::CarpetHumanRound
             | Body::CarpetHumanSquare
@@ -416,11 +466,11 @@ impl Body {
             | Body::ChestOpen
             | Body::ChestSkull
             | Body::ChestVines => 100.0,
-            Body::Coins => 1.0,
+            Body::Coins | Body::Scroll => 1.0,
             Body::CraftingBench => 100.0,
             Body::Crate => 50.0,
             Body::Crossbow => 200.0,
-            Body::Flamethrower => 200.0,
+            Body::Flamethrower | Body::Lavathrower => 200.0,
             Body::DoorSpooky => 20.0,
             Body::Drawer => 50.0,
             Body::FireworkBlue
@@ -449,7 +499,7 @@ impl Body {
             Body::WindowSpooky => 10.0,
             Body::SilverOre => 1000.0,
             Body::GoldOre => 1000.0,
-            Body::ClayRocket => 50.0,
+            Body::ClayRocket | Body::GrenadeClay => 50.0,
             Body::HaniwaSentry => 300.0,
             Body::SeaLantern => 1000.0,
             Body::Snowball => 7360.0, // 2.5 m diamter
@@ -462,7 +512,7 @@ impl Body {
             Body::Coconut => 2.0,
             Body::GnarlingTotemRed | Body::GnarlingTotemGreen | Body::GnarlingTotemWhite => 100.0,
             Body::IceBomb => 12298.0, // 2.5 m diamter but ice
-            Body::LaserBeam => 80000.0,
+            Body::LaserBeam | Body::LaserBeamSmall => 80000.0,
             Body::AdletSpear => 1.5,
             Body::AdletTrap => 10.0,
             Body::Mine => 100.0,
@@ -479,6 +529,8 @@ impl Body {
             | Body::ArrowSnake
             | Body::MultiArrow
             | Body::ArrowTurret
+            | Body::ArrowClay
+            | Body::BoltBesieger
             | Body::Dart
             | Body::AdletSpear => Vec3::new(0.01, 0.8, 0.01),
             Body::AdletTrap => Vec3::new(1.0, 0.6, 0.3),
@@ -487,6 +539,7 @@ impl Body {
             Body::SpectralSwordLarge => Vec3::new(0.2, 1.5, 0.1),
             Body::Crossbow => Vec3::new(3.0, 3.0, 1.5),
             Body::Flamethrower => Vec3::new(3.0, 3.0, 2.5),
+            Body::Lavathrower => Vec3::new(3.0, 3.0, 2.0),
             Body::HaniwaSentry => Vec3::new(0.8, 0.8, 1.4),
             Body::SeaLantern => Vec3::new(0.8, 0.8, 1.4),
             Body::Snowball => Vec3::broadcast(2.5),
@@ -496,11 +549,14 @@ impl Body {
                 Vec3::new(0.8, 0.8, 1.4)
             },
             Body::BarrelOrgan => Vec3::new(4.0, 2.0, 3.0),
+            Body::TerracottaStatue => Vec3::new(5.0, 5.0, 5.0),
             Body::IceBomb => Vec3::broadcast(2.5),
             Body::LaserBeam => Vec3::new(8.0, 8.0, 8.0),
+            Body::LaserBeamSmall => Vec3::new(1.0, 1.0, 1.0),
             Body::Mine => Vec3::new(0.8, 0.8, 0.5),
             Body::LightningBolt | Body::SpearIcicle => Vec3::new(1.0, 1.0, 1.0),
             Body::FireRainDrop => Vec3::new(0.01, 0.01, 0.02),
+            Body::Pebble => Vec3::new(0.4, 0.4, 0.4),
             // FIXME: this *must* be exhaustive match
             _ => Vec3::broadcast(0.5),
         }

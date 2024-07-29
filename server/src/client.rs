@@ -166,7 +166,7 @@ impl Client {
             ServerMsg::RegisterAnswer(m) => PreparedMsg::new(0, &m, &self.register_stream_params),
             ServerMsg::General(g) => {
                 match g {
-                    //Character Screen related
+                    // Character Screen related
                     ServerGeneral::CharacterDataLoadResult(_)
                     | ServerGeneral::CharacterListUpdate(_)
                     | ServerGeneral::CharacterActionError(_)
@@ -176,14 +176,14 @@ impl Client {
                     | ServerGeneral::SpectatorSuccess(_) => {
                         PreparedMsg::new(1, &g, &self.character_screen_stream_params)
                     },
-                    //In-game related
+                    // In-game related
                     ServerGeneral::GroupUpdate(_)
                     | ServerGeneral::Invite { .. }
                     | ServerGeneral::InvitePending(_)
                     | ServerGeneral::InviteComplete { .. }
                     | ServerGeneral::ExitInGameSuccess
                     | ServerGeneral::InventoryUpdate(_, _)
-                    | ServerGeneral::GroupInventoryUpdate(_, _, _)
+                    | ServerGeneral::GroupInventoryUpdate(_, _)
                     | ServerGeneral::SetViewDistance(_)
                     | ServerGeneral::Outcomes(_)
                     | ServerGeneral::Knockback(_)
@@ -192,7 +192,9 @@ impl Client {
                     | ServerGeneral::FinishedTrade(_)
                     | ServerGeneral::MapMarker(_)
                     | ServerGeneral::WeatherUpdate(_)
-                    | ServerGeneral::SpectatePosition(_) => {
+                    | ServerGeneral::LocalWindUpdate(_)
+                    | ServerGeneral::SpectatePosition(_)
+                    | ServerGeneral::UpdateRecipes => {
                         PreparedMsg::new(2, &g, &self.in_game_stream_params)
                     },
                     // Terrain
@@ -212,7 +214,8 @@ impl Client {
                     | ServerGeneral::CreateEntity(_)
                     | ServerGeneral::DeleteEntity(_)
                     | ServerGeneral::Disconnect(_)
-                    | ServerGeneral::Notification(_) => {
+                    | ServerGeneral::Notification(_)
+                    | ServerGeneral::PluginData(_) => {
                         PreparedMsg::new(3, &g, &self.general_stream_params)
                     },
                 }

@@ -5,7 +5,7 @@ use crate::{
         character_state::OutputEvents,
         CharacterState, StateUpdate,
     },
-    event::ServerEvent,
+    event::{AuraEvent, ComboChangeEvent},
     resources::Secs,
     states::{
         behavior::{CharacterBehavior, JoinData},
@@ -94,13 +94,14 @@ impl CharacterBehavior for Data {
                                     data.strength *=
                                         (self.static_data.combo_at_cast.max(1) as f32).sqrt();
                                 },
+                                AuraKind::FriendlyFire | AuraKind::ForcePvP => {},
                             }
-                            output_events.emit_server(ServerEvent::ComboChange {
+                            output_events.emit_server(ComboChangeEvent {
                                 entity: data.entity,
                                 change: -(self.static_data.combo_at_cast as i32),
                             });
                         }
-                        output_events.emit_server(ServerEvent::Aura {
+                        output_events.emit_server(AuraEvent {
                             entity: data.entity,
                             aura_change: AuraChange::Add(aura),
                         });
@@ -133,7 +134,11 @@ impl CharacterBehavior for Data {
                 if self.timer < self.static_data.recover_duration {
                     update.character = CharacterState::BasicAura(Data {
                         static_data: self.static_data.clone(),
-                        timer: tick_attack_or_default(data, self.timer, None),
+                        timer: tick_attack_or_default(
+                            data,
+                            self.timer,
+                            Some(data.stats.recovery_speed_modifier),
+                        ),
                         ..*self
                     });
                 } else {

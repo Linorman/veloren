@@ -1,36 +1,29 @@
+#[cfg(feature = "worldgen")]
+use crate::rtsim::RtSim;
 use crate::{
     automod::AutoMod,
     chat::ChatExporter,
     client::Client,
-    events::{self, update_map_markers},
+    events::{self, shared::update_map_markers},
     persistence::PersistedComponents,
     pet::restore_pet,
     presence::RepositionOnChunkLoad,
-    rtsim::RtSim,
     settings::Settings,
     sys::sentinel::DeletedEntities,
     wiring, BattleModeBuffer, SpawnPoint,
 };
+#[cfg(feature = "worldgen")]
+use common::{calendar::Calendar, resources::TimeOfDay, slowjob::SlowJobPool};
 use common::{
-    calendar::Calendar,
     character::CharacterId,
-    combat,
-    combat::DamageContributor,
     comp::{
-        self,
-        item::{ItemKind, MaterialStatManifest},
-        misc::PortalData,
-        object,
-        skills::{GeneralSkill, Skill},
-        ChatType, Content, Group, Inventory, Item, LootOwner, Object, Player, Poise, Presence,
-        PresenceKind, BASE_ABILITY_LIMIT,
+        self, item::ItemKind, misc::PortalData, object, ChatType, Content, Group, Inventory,
+        LootOwner, Object, Player, Poise, Presence, PresenceKind, BASE_ABILITY_LIMIT,
     },
-    effect::Effect,
     link::{Is, Link, LinkHandle},
     mounting::{Mounting, Rider, VolumeMounting, VolumeRider},
-    resources::{Secs, Time, TimeOfDay},
+    resources::{Secs, Time},
     rtsim::{Actor, RtSimEntity},
-    slowjob::SlowJobPool,
     tether::Tethered,
     uid::{IdMaps, Uid},
     util::Dir,
@@ -42,14 +35,15 @@ use common_net::{
 };
 use common_state::State;
 use rand::prelude::*;
-use specs::{Builder, Entity as EcsEntity, EntityBuilder as EcsEntityBuilder, Join, WorldExt};
+use specs::{
+    storage::{GenericReadStorage, GenericWriteStorage},
+    Builder, Entity as EcsEntity, EntityBuilder as EcsEntityBuilder, Join, WorldExt, WriteStorage,
+};
 use std::time::{Duration, Instant};
 use tracing::{error, trace, warn};
 use vek::*;
 
 pub trait StateExt {
-    /// Updates a component associated with the entity based on the `Effect`
-    fn apply_effect(&self, entity: EcsEntity, effect: Effect, source: Option<Uid>);
     /// Build a non-player character
     fn create_npc(
         &mut self,
@@ -62,6 +56,8 @@ pub trait StateExt {
         inventory: Inventory,
         body: comp::Body,
     ) -> EcsEntityBuilder;
+    /// Create an entity with only a position
+    fn create_empty(&mut self, pos: comp::Pos) -> EcsEntityBuilder;
     /// Build a static object entity
     fn create_object(&mut self, pos: comp::Pos, object: comp::object::Body) -> EcsEntityBuilder;
     /// Create an item drop or merge the item with an existing drop, if a
@@ -69,8 +65,9 @@ pub trait StateExt {
     fn create_item_drop(
         &mut self,
         pos: comp::Pos,
+        ori: comp::Ori,
         vel: comp::Vel,
-        item: Item,
+        item: comp::PickupItem,
         loot_owner: Option<LootOwner>,
     ) -> Option<EcsEntity>;
     fn create_ship<F: FnOnce(comp::ship::Body) -> comp::Collider>(
@@ -107,6 +104,7 @@ pub trait StateExt {
     /// Queues chunk generation in the view distance of the persister, this
     /// entity must be built before those chunks are received (the builder
     /// borrows the ecs world so that is kind of impossible in practice)
+    #[cfg(feature = "worldgen")]
     fn create_persister(
         &mut self,
         pos: comp::Pos,
@@ -171,110 +169,6 @@ pub trait StateExt {
 }
 
 impl StateExt for State {
-    fn apply_effect(&self, entity: EcsEntity, effects: Effect, source: Option<Uid>) {
-        let msm = self.ecs().read_resource::<MaterialStatManifest>();
-        match effects {
-            Effect::Health(change) => {
-                self.ecs()
-                    .write_storage::<comp::Health>()
-                    .get_mut(entity)
-                    .map(|mut health| health.change_by(change));
-            },
-            Effect::Damage(damage) => {
-                let inventories = self.ecs().read_storage::<Inventory>();
-                let stats = self.ecs().read_storage::<comp::Stats>();
-                let groups = self.ecs().read_storage::<Group>();
-
-                let damage_contributor = source.and_then(|uid| {
-                    self.ecs().entity_from_uid(uid).map(|attacker_entity| {
-                        DamageContributor::new(uid, groups.get(attacker_entity).cloned())
-                    })
-                });
-                let time = self.ecs().read_resource::<Time>();
-                let change = damage.calculate_health_change(
-                    combat::Damage::compute_damage_reduction(
-                        Some(damage),
-                        inventories.get(entity),
-                        stats.get(entity),
-                        &msm,
-                    ),
-                    damage_contributor,
-                    None,
-                    0.0,
-                    1.0,
-                    *time,
-                    random(),
-                );
-                self.ecs()
-                    .write_storage::<comp::Health>()
-                    .get_mut(entity)
-                    .map(|mut health| health.change_by(change));
-            },
-            Effect::Poise(poise) => {
-                let inventories = self.ecs().read_storage::<Inventory>();
-                let char_states = self.ecs().read_storage::<comp::CharacterState>();
-                let stats = self.ecs().read_storage::<comp::Stats>();
-
-                let change = Poise::apply_poise_reduction(
-                    poise,
-                    inventories.get(entity),
-                    &msm,
-                    char_states.get(entity),
-                    stats.get(entity),
-                );
-                // Check to make sure the entity is not already stunned
-                if let Some(character_state) = self
-                    .ecs()
-                    .read_storage::<comp::CharacterState>()
-                    .get(entity)
-                {
-                    if !character_state.is_stunned() {
-                        let groups = self.ecs().read_storage::<Group>();
-                        let damage_contributor = source.and_then(|uid| {
-                            self.ecs().entity_from_uid(uid).map(|attacker_entity| {
-                                DamageContributor::new(uid, groups.get(attacker_entity).cloned())
-                            })
-                        });
-                        let time = self.ecs().read_resource::<Time>();
-                        let poise_change = comp::PoiseChange {
-                            amount: change,
-                            impulse: Vec3::zero(),
-                            cause: None,
-                            by: damage_contributor,
-                            time: *time,
-                        };
-                        self.ecs()
-                            .write_storage::<Poise>()
-                            .get_mut(entity)
-                            .map(|mut poise| poise.change(poise_change));
-                    }
-                }
-            },
-            Effect::Buff(buff) => {
-                let time = self.ecs().read_resource::<Time>();
-                let stats = self.ecs().read_storage::<comp::Stats>();
-                let healths = self.ecs().read_storage::<comp::Health>();
-                self.ecs()
-                    .write_storage::<comp::Buffs>()
-                    .get_mut(entity)
-                    .map(|mut buffs| {
-                        buffs.insert(
-                            comp::Buff::new(
-                                buff.kind,
-                                buff.data,
-                                buff.cat_ids,
-                                comp::BuffSource::Item,
-                                *time,
-                                stats.get(entity),
-                                healths.get(entity),
-                            ),
-                            *time,
-                        )
-                    });
-            },
-        }
-    }
-
     fn create_npc(
         &mut self,
         pos: comp::Pos,
@@ -296,12 +190,7 @@ impl StateExt for State {
             .with(body.collider())
             .with(comp::Controller::default())
             .with(body)
-            .with(comp::Energy::new(
-                body,
-                skill_set
-                    .skill_level(Skill::General(GeneralSkill::EnergyIncrease))
-                    .unwrap_or(0),
-            ))
+            .with(comp::Energy::new(body))
             .with(stats)
             .with(if body.is_humanoid() {
                 comp::ActiveAbilities::default_limited(BASE_ABILITY_LIMIT)
@@ -318,16 +207,21 @@ impl StateExt for State {
             .with(comp::Buffs::default())
             .with(comp::Combo::default())
             .with(comp::Auras::default())
+            .with(comp::EnteredAuras::default())
             .with(comp::Stance::default())
     }
 
-    fn create_object(&mut self, pos: comp::Pos, object: comp::object::Body) -> EcsEntityBuilder {
-        let body = comp::Body::Object(object);
+    fn create_empty(&mut self, pos: comp::Pos) -> EcsEntityBuilder {
         self.ecs_mut()
             .create_entity_synced()
             .with(pos)
             .with(comp::Vel(Vec3::zero()))
             .with(comp::Ori::default())
+    }
+
+    fn create_object(&mut self, pos: comp::Pos, object: comp::object::Body) -> EcsEntityBuilder {
+        let body = comp::Body::Object(object);
+        self.create_empty(pos)
             .with(body.mass())
             .with(body.density())
             .with(body.collider())
@@ -337,55 +231,46 @@ impl StateExt for State {
     fn create_item_drop(
         &mut self,
         pos: comp::Pos,
+        ori: comp::Ori,
         vel: comp::Vel,
-        item: Item,
+        world_item: comp::PickupItem,
         loot_owner: Option<LootOwner>,
     ) -> Option<EcsEntity> {
+        // Attempt merging with any nearby entities if possible
         {
-            const MAX_MERGE_DIST: f32 = 1.5;
+            use crate::sys::item::get_nearby_mergeable_items;
 
-            // First, try to identify possible candidates for item merging
-            // We limit our search to just a few blocks and we prioritise merging with the
-            // closest
             let positions = self.ecs().read_storage::<comp::Pos>();
             let loot_owners = self.ecs().read_storage::<LootOwner>();
-            let mut items = self.ecs().write_storage::<Item>();
-            let mut nearby_items = self
-                .ecs()
-                .read_resource::<common::CachedSpatialGrid>()
-                .0
-                .in_circle_aabr(pos.0.xy(), MAX_MERGE_DIST)
-                .filter(|entity| items.contains(*entity))
-                .filter_map(|entity| {
-                    Some((entity, positions.get(entity)?.0.distance_squared(pos.0)))
-                })
-                .filter(|(_, dist_sqrd)| *dist_sqrd < MAX_MERGE_DIST.powi(2))
-                .collect::<Vec<_>>();
-            nearby_items.sort_by_key(|(_, dist_sqrd)| (dist_sqrd * 1000.0) as i32);
-            for (nearby, _) in nearby_items {
-                // Only merge if the loot owner is the same
-                if loot_owners.get(nearby).map(|lo| lo.owner()) == loot_owner.map(|lo| lo.owner())
-                    && items
-                        .get(nearby)
-                        .map_or(false, |nearby_item| nearby_item.can_merge(&item))
-                {
-                    // Merging can occur! Perform the merge:
-                    items
-                        .get_mut(nearby)
-                        .expect("we know that the item exists")
-                        .try_merge(item)
-                        .expect("`try_merge` should succeed because `can_merge` returned `true`");
-                    return None;
-                }
+            let mut items = self.ecs().write_storage::<comp::PickupItem>();
+            let entities = self.ecs().entities();
+            let spatial_grid = self.ecs().read_resource();
+
+            let nearby_items = get_nearby_mergeable_items(
+                &world_item,
+                &pos,
+                loot_owner.as_ref(),
+                (&entities, &items, &positions, &loot_owners, &spatial_grid),
+            );
+
+            // Merge the nearest item if possible, skip to creating a drop otherwise
+            if let Some((mergeable_item, _)) =
+                nearby_items.min_by_key(|(_, dist)| (dist * 1000.0) as i32)
+            {
+                items
+                    .get_mut(mergeable_item)
+                    .expect("we know that the item exists")
+                    .try_merge(world_item)
+                    .expect("`try_merge` should succeed because `can_merge` returned `true`");
+                return None;
             }
-            // Only if merging items fails do we give up and create a new item
         }
 
         let spawned_at = *self.ecs().read_resource::<Time>();
 
-        let item_drop = comp::item_drop::Body::from(&item);
+        let item_drop = comp::item_drop::Body::from(world_item.item());
         let body = comp::Body::ItemDrop(item_drop);
-        let light_emitter = match &*item.kind() {
+        let light_emitter = match &*world_item.item().kind() {
             ItemKind::Lantern(lantern) => Some(comp::LightEmitter {
                 col: lantern.color(),
                 strength: lantern.strength(),
@@ -397,8 +282,9 @@ impl StateExt for State {
         Some(
             self.ecs_mut()
                 .create_entity_synced()
-                .with(item)
+                .with(world_item)
                 .with(pos)
+                .with(ori)
                 .with(vel)
                 .with(item_drop.orientation(&mut thread_rng()))
                 .with(item_drop.mass())
@@ -440,7 +326,7 @@ impl StateExt for State {
             .with(comp::CharacterActivity::default())
             // TODO: some of these are required in order for the character_behavior system to
             // recognize a possesed airship; that system should be refactored to use `.maybe()`
-            .with(comp::Energy::new(ship.into(), 0))
+            .with(comp::Energy::new(ship.into()))
             .with(comp::Stats::new("Airship".to_string(), body))
             .with(comp::SkillSet::default())
             .with(comp::ActiveAbilities::default())
@@ -551,6 +437,7 @@ impl StateExt for State {
     /// Queues chunk generation in the view distance of the persister, this
     /// entity must be built before those chunks are received (the builder
     /// borrows the ecs world so that is kind of impossible in practice)
+    #[cfg(feature = "worldgen")]
     fn create_persister(
         &mut self,
         pos: comp::Pos,
@@ -564,10 +451,7 @@ impl StateExt for State {
         {
             let ecs = self.ecs();
             let slow_jobs = ecs.write_resource::<SlowJobPool>();
-            #[cfg(feature = "worldgen")]
             let rtsim = ecs.read_resource::<RtSim>();
-            #[cfg(not(feature = "worldgen"))]
-            let rtsim = ();
             let mut chunk_generator =
                 ecs.write_resource::<crate::chunk_generator::ChunkGenerator>();
             let chunk_pos = self.terrain().pos_key(pos.0.map(|e| e as i32));
@@ -585,7 +469,6 @@ impl StateExt for State {
                     * TerrainChunkSize::RECT_SIZE.x as f64
             })
             .for_each(|chunk_key| {
-                #[cfg(feature = "worldgen")]
                 {
                     let time = (*ecs.read_resource::<TimeOfDay>(), (*ecs.read_resource::<Calendar>()).clone());
                     chunk_generator.generate_chunk(None, chunk_key, &slow_jobs, Arc::clone(world), &rtsim, index.clone(), time);
@@ -640,6 +523,7 @@ impl StateExt for State {
             self.write_component_ignore_entity_dead(entity, comp::Alignment::Owned(player_uid));
             self.write_component_ignore_entity_dead(entity, comp::Buffs::default());
             self.write_component_ignore_entity_dead(entity, comp::Auras::default());
+            self.write_component_ignore_entity_dead(entity, comp::EnteredAuras::default());
             self.write_component_ignore_entity_dead(entity, comp::Combo::default());
             self.write_component_ignore_entity_dead(entity, comp::Stance::default());
 
@@ -726,6 +610,8 @@ impl StateExt for State {
             self.notify_players(ServerGeneral::PlayerListUpdate(
                 PlayerListUpdate::SelectedCharacter(player_uid, CharacterInfo {
                     name: String::from(&stats.name),
+                    // NOTE: hack, read docs on body::Gender for more
+                    gender: stats.original_body.humanoid_gender(),
                 }),
             ));
 
@@ -737,16 +623,8 @@ impl StateExt for State {
             self.write_component_ignore_entity_dead(entity, body);
             self.write_component_ignore_entity_dead(entity, body.mass());
             self.write_component_ignore_entity_dead(entity, body.density());
-            let (health_level, energy_level) = (
-                skill_set
-                    .skill_level(Skill::General(GeneralSkill::HealthIncrease))
-                    .unwrap_or(0),
-                skill_set
-                    .skill_level(Skill::General(GeneralSkill::EnergyIncrease))
-                    .unwrap_or(0),
-            );
-            self.write_component_ignore_entity_dead(entity, comp::Health::new(body, health_level));
-            self.write_component_ignore_entity_dead(entity, comp::Energy::new(body, energy_level));
+            self.write_component_ignore_entity_dead(entity, comp::Health::new(body));
+            self.write_component_ignore_entity_dead(entity, comp::Energy::new(body));
             self.write_component_ignore_entity_dead(entity, Poise::new(body));
             self.write_component_ignore_entity_dead(entity, stats);
             self.write_component_ignore_entity_dead(entity, active_abilities);
@@ -781,9 +659,6 @@ impl StateExt for State {
                     pets.len(),
                     player_pos
                 );
-                // This is the same as wild creatures naturally spawned in the world
-                const DEFAULT_PET_HEALTH_LEVEL: u16 = 0;
-
                 let mut rng = rand::thread_rng();
 
                 for (pet, body, stats) in pets {
@@ -794,7 +669,7 @@ impl StateExt for State {
                             ori,
                             stats,
                             comp::SkillSet::default(),
-                            Some(comp::Health::new(body, DEFAULT_PET_HEALTH_LEVEL)),
+                            Some(comp::Health::new(body)),
                             Poise::new(body),
                             Inventory::with_loadout(
                                 LoadoutBuilder::from_default(&body).build(),
@@ -1205,7 +1080,7 @@ impl StateExt for State {
         }
 
         // Cancel extant trades
-        events::cancel_trades_for(self, entity);
+        events::shared::cancel_trades_for(self, entity);
 
         // NOTE: We expect that these 3 components are never removed from an entity (nor
         // mutated) (at least not without updating the relevant mappings)!
@@ -1253,70 +1128,83 @@ impl StateExt for State {
         dismount_volume: bool,
         f: impl for<'a> FnOnce(&'a mut comp::Pos) -> T,
     ) -> Result<T, Content> {
-        if dismount_volume {
-            self.ecs().write_storage::<Is<VolumeRider>>().remove(entity);
-        }
-
-        let entity = self
-            .read_storage::<Is<Rider>>()
-            .get(entity)
-            .and_then(|is_rider| {
-                self.ecs()
-                    .read_resource::<IdMaps>()
-                    .uid_entity(is_rider.mount)
-            })
-            .map(Ok)
-            .or_else(|| {
-                self.read_storage::<Is<VolumeRider>>()
-                    .get(entity)
-                    .and_then(|volume_rider| {
-                        Some(match volume_rider.pos.kind {
-                            common::mounting::Volume::Terrain => Err("Tried to move the world."),
-                            common::mounting::Volume::Entity(uid) => {
-                                Ok(self.ecs().read_resource::<IdMaps>().uid_entity(uid)?)
-                            },
-                        })
-                    })
-            })
-            .unwrap_or(Ok(entity))?;
-
-        let mut maybe_pos = None;
-
-        let res = self
-            .ecs()
-            .write_storage::<comp::Pos>()
-            .get_mut(entity)
-            .map(|pos| {
-                let res = f(pos);
-                maybe_pos = Some(pos.0);
-                res
-            })
-            .ok_or(Content::localized_with_args(
-                "command-position-unavailable",
-                [("target", "entity")],
-            ));
-
-        if let Some(pos) = maybe_pos {
-            if self
-                .ecs()
-                .read_storage::<Presence>()
-                .get(entity)
-                .map(|presence| presence.kind == PresenceKind::Spectator)
-                .unwrap_or(false)
-            {
-                self.read_storage::<Client>().get(entity).map(|client| {
-                    client.send_fallible(ServerGeneral::SpectatePosition(pos));
-                });
-            } else {
-                self.ecs()
-                    .write_storage::<comp::ForceUpdate>()
-                    .get_mut(entity)
-                    .map(|force_update| force_update.update());
-            }
-        }
-
-        res
+        let ecs = self.ecs_mut();
+        position_mut(
+            entity,
+            dismount_volume,
+            f,
+            &ecs.read_resource(),
+            &mut ecs.write_storage(),
+            ecs.write_storage(),
+            ecs.write_storage(),
+            ecs.read_storage(),
+            ecs.read_storage(),
+            ecs.read_storage(),
+        )
     }
+}
+
+pub fn position_mut<T>(
+    entity: EcsEntity,
+    dismount_volume: bool,
+    f: impl for<'a> FnOnce(&'a mut comp::Pos) -> T,
+    id_maps: &IdMaps,
+    is_volume_riders: &mut WriteStorage<Is<VolumeRider>>,
+    mut positions: impl GenericWriteStorage<Component = comp::Pos>,
+    mut force_updates: impl GenericWriteStorage<Component = comp::ForceUpdate>,
+    is_riders: impl GenericReadStorage<Component = Is<Rider>>,
+    presences: impl GenericReadStorage<Component = Presence>,
+    clients: impl GenericReadStorage<Component = Client>,
+) -> Result<T, Content> {
+    if dismount_volume {
+        is_volume_riders.remove(entity);
+    }
+
+    let entity = is_riders
+        .get(entity)
+        .and_then(|is_rider| id_maps.uid_entity(is_rider.mount))
+        .map(Ok)
+        .or_else(|| {
+            is_volume_riders.get(entity).and_then(|volume_rider| {
+                Some(match volume_rider.pos.kind {
+                    common::mounting::Volume::Terrain => Err("Tried to move the world."),
+                    common::mounting::Volume::Entity(uid) => Ok(id_maps.uid_entity(uid)?),
+                })
+            })
+        })
+        .unwrap_or(Ok(entity))?;
+
+    let mut maybe_pos = None;
+
+    let res = positions
+        .get_mut(entity)
+        .map(|pos| {
+            let res = f(pos);
+            maybe_pos = Some(pos.0);
+            res
+        })
+        .ok_or(Content::localized_with_args(
+            "command-position-unavailable",
+            [("target", "entity")],
+        ));
+
+    if let Some(pos) = maybe_pos {
+        if presences
+            .get(entity)
+            .map(|presence| presence.kind == PresenceKind::Spectator)
+            .unwrap_or(false)
+        {
+            clients.get(entity).map(|client| {
+                client.send_fallible(ServerGeneral::SpectatePosition(pos));
+            });
+        } else {
+            force_updates
+                .get_mut(entity)
+                .map(|force_update| force_update.update());
+        }
+    }
+
+    res
 }
 
 fn send_to_group(g: &Group, ecs: &specs::World, msg: &comp::ChatMsg) {

@@ -1,8 +1,14 @@
 use crate::{
     assets::{self, AssetCombined, Concatenate},
-    comp::{self, buff::BuffKind, inventory::item::try_all_item_defs, AdminRole as Role, Skill},
+    combat::GroupTarget,
+    comp::{
+        self, aura::AuraKindVariant, buff::BuffKind, inventory::item::try_all_item_defs,
+        AdminRole as Role, Skill,
+    },
     generation::try_all_entity_configs,
-    npc, terrain,
+    npc,
+    recipe::RecipeBookManifest,
+    terrain,
 };
 use hashbrown::HashMap;
 use lazy_static::lazy_static;
@@ -133,6 +139,10 @@ lazy_static! {
         .iter()
         .map(|o| o.to_string().to_string())
         .collect();
+    static ref RECIPES: Vec<String> = {
+        let rbm = RecipeBookManifest::load().cloned();
+        rbm.keys().cloned().collect::<Vec<String>>()
+    };
     static ref TIMES: Vec<String> = [
         "midnight", "night", "dawn", "morning", "day", "noon", "dusk"
     ]
@@ -184,7 +194,14 @@ lazy_static! {
             BuffKind::Defiance => "defiance",
             BuffKind::Bloodfeast => "bloodfeast",
             BuffKind::Berserk => "berserk",
-            BuffKind::Heatstroke => "heatstroke"
+            BuffKind::Heatstroke => "heatstroke",
+            BuffKind::ScornfulTaunt => "scornful_taunt",
+            BuffKind::Rooted => "rooted",
+            BuffKind::Winded => "winded",
+            BuffKind::Concussion => "concussion",
+            BuffKind::Staggered => "staggered",
+            BuffKind::Tenacity => "tenacity",
+            BuffKind::Resilience => "resilience",
         };
         let mut buff_parser = HashMap::new();
         for kind in BuffKind::iter() {
@@ -242,7 +259,7 @@ lazy_static! {
     };
 
     pub static ref KITS: Vec<String> = {
-        let mut kits = if let Ok(kits) = KitManifest::load_and_combine(KIT_MANIFEST_PATH) {
+        let mut kits = if let Ok(kits) = KitManifest::load_and_combine_static(KIT_MANIFEST_PATH) {
             let mut kits = kits.read().0.keys().cloned().collect::<Vec<String>>();
             kits.sort();
             kits
@@ -255,7 +272,7 @@ lazy_static! {
     };
 
     static ref PRESETS: HashMap<String, Vec<(Skill, u8)>> = {
-        if let Ok(presets) = SkillPresetManifest::load_and_combine(PRESET_MANIFEST_PATH) {
+        if let Ok(presets) = SkillPresetManifest::load_and_combine_static(PRESET_MANIFEST_PATH) {
             presets.read().0.clone()
         } else {
             warn!("Error while loading presets");
@@ -313,6 +330,7 @@ pub enum ServerChatCommand {
     AreaAdd,
     AreaList,
     AreaRemove,
+    Aura,
     Ban,
     BattleMode,
     BattleModeForce,
@@ -320,6 +338,7 @@ pub enum ServerChatCommand {
     Buff,
     Build,
     Campfire,
+    ClearPersistedTerrain,
     CreateLocation,
     DebugColumn,
     DebugWays,
@@ -338,9 +357,9 @@ pub enum ServerChatCommand {
     GroupKick,
     GroupLeave,
     GroupPromote,
-    Heal,
     Health,
     Help,
+    IntoNpc,
     JoinFaction,
     Jump,
     Kick,
@@ -365,6 +384,7 @@ pub enum ServerChatCommand {
     ReloadChunks,
     RemoveLights,
     RepairEquipment,
+    ResetRecipes,
     Respawn,
     RevokeBuild,
     RevokeBuildAll,
@@ -431,6 +451,18 @@ impl ServerChatCommand {
                 "Change your alias",
                 Some(Moderator),
             ),
+            ServerChatCommand::Aura => cmd(
+                vec![
+                    Float("aura_radius", 10.0, Required),
+                    Float("aura_duration", 10.0, Optional),
+                    Boolean("new_entity", "true".to_string(), Optional),
+                    Enum("aura_target", GroupTarget::all_options(), Optional),
+                    Enum("aura_kind", AuraKindVariant::all_options(), Required),
+                    Any("aura spec", Optional),
+                ],
+                "Create an aura",
+                Some(Admin),
+            ),
             ServerChatCommand::Buff => cmd(
                 vec![
                     Enum("buff", BUFFS.clone(), Required),
@@ -465,6 +497,16 @@ impl ServerChatCommand {
                 If called without arguments will show current battle mode.",
                 None,
 
+            ),
+            ServerChatCommand::IntoNpc => cmd(
+                vec![AssetPath(
+                    "entity_config",
+                    "common.entity.",
+                    ENTITY_CONFIGS.clone(),
+                    Required,
+                )],
+                "Convert yourself to an NPC. Be careful!",
+                Some(Admin),
             ),
             ServerChatCommand::Body => cmd(
                 vec![Enum("body", ENTITIES.clone(), Required)],
@@ -505,15 +547,20 @@ impl ServerChatCommand {
                 Some(Admin),
             ),
             ServerChatCommand::Campfire => cmd(vec![], "Spawns a campfire", Some(Admin)),
+            ServerChatCommand::ClearPersistedTerrain => cmd(
+                vec![Integer("chunk_radius", 6, Required)],
+                "Clears nearby persisted terrain",
+                Some(Admin),
+            ),
             ServerChatCommand::DebugColumn => cmd(
                 vec![Integer("x", 15000, Required), Integer("y", 15000, Required)],
                 "Prints some debug information about a column",
-                Some(Moderator),
+                Some(Admin),
             ),
             ServerChatCommand::DebugWays => cmd(
                 vec![Integer("x", 15000, Required), Integer("y", 15000, Required)],
                 "Prints some debug information about a column's ways",
-                Some(Moderator),
+                Some(Admin),
             ),
             ServerChatCommand::DisconnectAllPlayers => cmd(
                 vec![Any("confirm", Required)],
@@ -538,7 +585,7 @@ impl ServerChatCommand {
             ),
             ServerChatCommand::GiveItem => cmd(
                 vec![
-                    Enum("item", ITEM_SPECS.clone(), Required),
+                    AssetPath("item", "common.items.", ITEM_SPECS.clone(), Required),
                     Integer("num", 1, Optional),
                 ],
                 "Give yourself some items.\nFor an example or to auto complete use Tab.",
@@ -573,11 +620,6 @@ impl ServerChatCommand {
                 "Promote a player to group leader",
                 None,
             ),
-            ServerChatCommand::Heal => cmd(
-                vec![], // 参数
-                "Heal the player to full health", // 描述
-                Some(Admin), // 权限要求
-            ),
             ServerChatCommand::Health => cmd(
                 vec![Integer("hp", 100, Required)],
                 "Set your current health",
@@ -610,7 +652,11 @@ impl ServerChatCommand {
                 Some(Moderator),
             ),
             ServerChatCommand::Kill => cmd(vec![], "Kill yourself", None),
-            ServerChatCommand::KillNpcs => cmd(vec![], "Kill the NPCs", Some(Admin)),
+            ServerChatCommand::KillNpcs => cmd(
+                vec![Float("radius", 100.0, Optional), Flag("--also-pets")],
+                "Kill the NPCs",
+                Some(Admin),
+            ),
             ServerChatCommand::Kit => cmd(
                 vec![Enum("kit_name", KITS.to_vec(), Required)],
                 "Place a set of items into your inventory.",
@@ -651,7 +697,12 @@ impl ServerChatCommand {
             ),
             ServerChatCommand::MakeNpc => cmd(
                 vec![
-                    Enum("entity_config", ENTITY_CONFIGS.clone(), Required),
+                    AssetPath(
+                        "entity_config",
+                        "common.entity.",
+                        ENTITY_CONFIGS.clone(),
+                        Required,
+                    ),
                     Integer("num", 1, Optional),
                 ],
                 "Spawn entity from config near you.\nFor an example or to auto complete use Tab.",
@@ -686,10 +737,11 @@ impl ServerChatCommand {
                 Some(Admin),
             ),
             ServerChatCommand::ReloadChunks => cmd(
-                vec![],
-                "Reloads all chunks loaded on the server",
+                vec![Integer("chunk_radius", 6, Optional)],
+                "Reloads chunks loaded on the server",
                 Some(Admin),
             ),
+            ServerChatCommand::ResetRecipes => cmd(vec![], "Resets your recipe book", Some(Admin)),
             ServerChatCommand::RemoveLights => cmd(
                 vec![Float("radius", 20.0, Optional)],
                 "Removes all lights spawned by players",
@@ -822,18 +874,18 @@ impl ServerChatCommand {
                     Boolean("Dismount from ship", "true".to_string(), Optional),
                 ],
                 "Teleport to an rtsim npc",
-                Some(Moderator),
+                Some(Admin),
             ),
             ServerChatCommand::RtsimInfo => cmd(
                 vec![Integer("npc index", 0, Required)],
                 "Display information about an rtsim NPC",
-                Some(Moderator),
+                Some(Admin),
             ),
             ServerChatCommand::RtsimNpc => cmd(
                 vec![Any("query", Required), Integer("max number", 20, Optional)],
                 "List rtsim NPCs that fit a given query (e.g: simulated,merchant) in order of \
                  distance",
-                Some(Moderator),
+                Some(Admin),
             ),
             ServerChatCommand::RtsimPurge => cmd(
                 vec![Boolean(
@@ -847,7 +899,7 @@ impl ServerChatCommand {
             ServerChatCommand::RtsimChunk => cmd(
                 vec![],
                 "Display information about the current chunk from rtsim",
-                Some(Moderator),
+                Some(Admin),
             ),
             ServerChatCommand::Unban => cmd(
                 vec![PlayerName(Required)],
@@ -940,16 +992,18 @@ impl ServerChatCommand {
             ServerChatCommand::Adminify => "adminify",
             ServerChatCommand::Airship => "airship",
             ServerChatCommand::Alias => "alias",
+            ServerChatCommand::AreaAdd => "area_add",
+            ServerChatCommand::AreaList => "area_list",
+            ServerChatCommand::AreaRemove => "area_remove",
+            ServerChatCommand::Aura => "aura",
             ServerChatCommand::Ban => "ban",
             ServerChatCommand::BattleMode => "battlemode",
             ServerChatCommand::BattleModeForce => "battlemode_force",
             ServerChatCommand::Body => "body",
             ServerChatCommand::Buff => "buff",
             ServerChatCommand::Build => "build",
-            ServerChatCommand::AreaAdd => "area_add",
-            ServerChatCommand::AreaList => "area_list",
-            ServerChatCommand::AreaRemove => "area_remove",
             ServerChatCommand::Campfire => "campfire",
+            ServerChatCommand::ClearPersistedTerrain => "clear_persisted_terrain",
             ServerChatCommand::DebugColumn => "debug_column",
             ServerChatCommand::DebugWays => "debug_ways",
             ServerChatCommand::DisconnectAllPlayers => "disconnect_all_players",
@@ -962,12 +1016,11 @@ impl ServerChatCommand {
             ServerChatCommand::Group => "group",
             ServerChatCommand::GroupInvite => "group_invite",
             ServerChatCommand::GroupKick => "group_kick",
-            ServerChatCommand::GroupPromote => "group_promote",
             ServerChatCommand::GroupLeave => "group_leave",
-            ServerChatCommand::Heal => "heal",
+            ServerChatCommand::GroupPromote => "group_promote",
             ServerChatCommand::Health => "health",
             ServerChatCommand::Help => "help",
-            ServerChatCommand::Respawn => "respawn",
+            ServerChatCommand::IntoNpc => "into_npc",
             ServerChatCommand::JoinFaction => "join_faction",
             ServerChatCommand::Jump => "jump",
             ServerChatCommand::Kick => "kick",
@@ -975,6 +1028,7 @@ impl ServerChatCommand {
             ServerChatCommand::KillNpcs => "kill_npcs",
             ServerChatCommand::Kit => "kit",
             ServerChatCommand::Lantern => "lantern",
+            ServerChatCommand::Respawn => "respawn",
             ServerChatCommand::Light => "light",
             ServerChatCommand::MakeBlock => "make_block",
             ServerChatCommand::MakeNpc => "make_npc",
@@ -984,6 +1038,7 @@ impl ServerChatCommand {
             ServerChatCommand::PermitBuild => "permit_build",
             ServerChatCommand::Players => "players",
             ServerChatCommand::Portal => "portal",
+            ServerChatCommand::ResetRecipes => "reset_recipes",
             ServerChatCommand::Region => "region",
             ServerChatCommand::ReloadChunks => "reload_chunks",
             ServerChatCommand::RemoveLights => "remove_lights",
@@ -1084,7 +1139,9 @@ impl ServerChatCommand {
                 ArgumentSpec::Message(_) => "{/.*/}",
                 ArgumentSpec::SubCommand => "{} {/.*/}",
                 ArgumentSpec::Enum(_, _, _) => "{}",
+                ArgumentSpec::AssetPath(_, _, _, _) => "{}",
                 ArgumentSpec::Boolean(_, _, _) => "{}",
+                ArgumentSpec::Flag(_) => "{}",
             })
             .collect::<Vec<_>>()
             .join(" ")
@@ -1150,11 +1207,19 @@ pub enum ArgumentSpec {
     /// * Predefined string completions
     /// * whether it's optional
     Enum(&'static str, Vec<String>, Requirement),
+    /// The argument is an asset path. The associated values are
+    /// * label
+    /// * Path prefix shared by all assets
+    /// * List of all asset paths as strings for completion
+    /// * whether it's optional
+    AssetPath(&'static str, &'static str, Vec<String>, Requirement),
     /// The argument is likely a boolean. The associated values are
     /// * label
     /// * suggested tab-completion
     /// * whether it's optional
     Boolean(&'static str, String, Requirement),
+    /// The argument is a flag that enables or disables a feature.
+    Flag(&'static str),
 }
 
 impl ArgumentSpec {
@@ -1224,12 +1289,22 @@ impl ArgumentSpec {
                     format!("[{}]", label)
                 }
             },
+            ArgumentSpec::AssetPath(label, _, _, req) => {
+                if &Requirement::Required == req {
+                    format!("<{}>", label)
+                } else {
+                    format!("[{}]", label)
+                }
+            },
             ArgumentSpec::Boolean(label, _, req) => {
                 if &Requirement::Required == req {
                     format!("<{}>", label)
                 } else {
                     format!("[{}]", label)
                 }
+            },
+            ArgumentSpec::Flag(label) => {
+                format!("[{}]", label)
             },
         }
     }
@@ -1245,11 +1320,51 @@ impl ArgumentSpec {
             | ArgumentSpec::Command(r)
             | ArgumentSpec::Message(r)
             | ArgumentSpec::Enum(_, _, r)
+            | ArgumentSpec::AssetPath(_, _, _, r)
             | ArgumentSpec::Boolean(_, _, r) => *r,
+            ArgumentSpec::Flag(_) => Requirement::Optional,
             ArgumentSpec::SubCommand => Requirement::Required,
         }
     }
 }
+
+pub trait CommandEnumArg: FromStr {
+    fn all_options() -> Vec<String>;
+}
+
+macro_rules! impl_from_to_str_cmd {
+    ($enum:ident, ($($attribute:ident => $str:expr),*)) => {
+        impl std::str::FromStr for $enum {
+            type Err = String;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match s {
+                    $(
+                        $str => Ok($enum::$attribute),
+                    )*
+                    s => Err(format!("Invalid variant: {s}")),
+                }
+            }
+        }
+
+        impl $crate::cmd::CommandEnumArg for $enum {
+            fn all_options() -> Vec<String> {
+                vec![$($str.to_string()),*]
+            }
+        }
+    }
+}
+
+impl_from_to_str_cmd!(AuraKindVariant, (
+    Buff => "buff",
+    FriendlyFire => "friendly_fire",
+    ForcePvP => "force_pvp"
+));
+
+impl_from_to_str_cmd!(GroupTarget, (
+    InGroup => "in_group",
+    OutOfGroup => "out_of_group"
+));
 
 /// Parse a series of command arguments into values, including collecting all
 /// trailing arguments.
@@ -1302,12 +1417,12 @@ mod tests {
 
     #[test]
     fn test_loading_skill_presets() {
-        SkillPresetManifest::load_expect_combined(PRESET_MANIFEST_PATH);
+        SkillPresetManifest::load_expect_combined_static(PRESET_MANIFEST_PATH);
     }
 
     #[test]
     fn test_load_kits() {
-        let kits = KitManifest::load_expect_combined(KIT_MANIFEST_PATH).read();
+        let kits = KitManifest::load_expect_combined_static(KIT_MANIFEST_PATH).read();
         let mut rng = rand::thread_rng();
         for kit in kits.0.values() {
             for (item_id, _) in kit.iter() {

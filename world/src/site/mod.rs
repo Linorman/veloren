@@ -73,15 +73,19 @@ pub enum SiteKind {
     ChapelSite(site2::Site),
     DwarvenMine(site2::Site),
     CoastalTown(site2::Site),
+    Terracotta(site2::Site),
     GiantTree(site2::Site),
     Gnarling(site2::Site),
     Bridge(site2::Site),
     Adlet(site2::Site),
+    Haniwa(site2::Site),
     PirateHideout(site2::Site),
     JungleRuin(site2::Site),
     RockCircle(site2::Site),
     TrollCave(site2::Site),
     Camp(site2::Site),
+    Cultist(site2::Site),
+    Sahagin(site2::Site),
 }
 
 impl Site {
@@ -109,6 +113,13 @@ impl Site {
     pub fn adlet(ad: site2::Site) -> Self {
         Self {
             kind: SiteKind::Adlet(ad),
+            economy: Economy::default(),
+        }
+    }
+
+    pub fn haniwa(ha: site2::Site) -> Self {
+        Self {
+            kind: SiteKind::Haniwa(ha),
             economy: Economy::default(),
         }
     }
@@ -197,9 +208,30 @@ impl Site {
         }
     }
 
+    pub fn cultist(cl: site2::Site) -> Self {
+        Self {
+            kind: SiteKind::Cultist(cl),
+            economy: Economy::default(),
+        }
+    }
+
+    pub fn sahagin(sg: site2::Site) -> Self {
+        Self {
+            kind: SiteKind::Sahagin(sg),
+            economy: Economy::default(),
+        }
+    }
+
     pub fn dwarven_mine(dm: site2::Site) -> Self {
         Self {
             kind: SiteKind::DwarvenMine(dm),
+            economy: Economy::default(),
+        }
+    }
+
+    pub fn terracotta(tr: site2::Site) -> Self {
+        Self {
+            kind: SiteKind::Terracotta(tr),
             economy: Economy::default(),
         }
     }
@@ -242,11 +274,15 @@ impl Site {
             SiteKind::DesertCity(dc) => dc.radius(),
             SiteKind::ChapelSite(p) => p.radius(),
             SiteKind::DwarvenMine(dm) => dm.radius(),
+            SiteKind::Terracotta(tr) => tr.radius(),
             SiteKind::Tree(t) => t.radius(),
             SiteKind::GiantTree(gt) => gt.radius(),
             SiteKind::Gnarling(g) => g.radius(),
             SiteKind::Bridge(b) => b.radius(),
             SiteKind::Adlet(ad) => ad.radius(),
+            SiteKind::Haniwa(ha) => ha.radius(),
+            SiteKind::Cultist(cl) => cl.radius(),
+            SiteKind::Sahagin(sg) => sg.radius(),
         }
     }
 
@@ -267,11 +303,15 @@ impl Site {
             SiteKind::DesertCity(dc) => dc.origin,
             SiteKind::ChapelSite(p) => p.origin,
             SiteKind::DwarvenMine(dm) => dm.origin,
+            SiteKind::Terracotta(tr) => tr.origin,
             SiteKind::Tree(t) => t.origin,
             SiteKind::GiantTree(gt) => gt.origin,
             SiteKind::Gnarling(g) => g.origin,
             SiteKind::Bridge(b) => b.origin,
             SiteKind::Adlet(ad) => ad.origin,
+            SiteKind::Haniwa(ha) => ha.origin,
+            SiteKind::Cultist(cl) => cl.origin,
+            SiteKind::Sahagin(sg) => sg.origin,
         }
     }
 
@@ -292,11 +332,15 @@ impl Site {
             SiteKind::DesertCity(dc) => dc.spawn_rules(wpos),
             SiteKind::ChapelSite(p) => p.spawn_rules(wpos),
             SiteKind::DwarvenMine(dm) => dm.spawn_rules(wpos),
+            SiteKind::Terracotta(tr) => tr.spawn_rules(wpos),
             SiteKind::Tree(t) => t.spawn_rules(wpos),
             SiteKind::GiantTree(gt) => gt.spawn_rules(wpos),
             SiteKind::Gnarling(g) => g.spawn_rules(wpos),
             SiteKind::Bridge(b) => b.spawn_rules(wpos),
             SiteKind::Adlet(ad) => ad.spawn_rules(wpos),
+            SiteKind::Haniwa(ha) => ha.spawn_rules(wpos),
+            SiteKind::Cultist(cl) => cl.spawn_rules(wpos),
+            SiteKind::Sahagin(sg) => sg.spawn_rules(wpos),
         }
     }
 
@@ -316,12 +360,16 @@ impl Site {
             SiteKind::Camp(cp) => cp.name(),
             SiteKind::DesertCity(dc) => dc.name(),
             SiteKind::ChapelSite(p) => p.name(),
+            SiteKind::Terracotta(tr) => tr.name(),
             SiteKind::DwarvenMine(dm) => dm.name(),
             SiteKind::Tree(_) => "Giant Tree",
             SiteKind::GiantTree(gt) => gt.name(),
             SiteKind::Gnarling(g) => g.name(),
             SiteKind::Bridge(b) => b.name(),
             SiteKind::Adlet(ad) => ad.name(),
+            SiteKind::Haniwa(ha) => ha.name(),
+            SiteKind::Cultist(cl) => cl.name(),
+            SiteKind::Sahagin(sg) => sg.name(),
         }
     }
 
@@ -361,12 +409,16 @@ impl Site {
             SiteKind::Camp(cp) => cp.render(canvas, dynamic_rng),
             SiteKind::DesertCity(dc) => dc.render(canvas, dynamic_rng),
             SiteKind::ChapelSite(p) => p.render(canvas, dynamic_rng),
+            SiteKind::Terracotta(tr) => tr.render(canvas, dynamic_rng),
             SiteKind::DwarvenMine(dm) => dm.render(canvas, dynamic_rng),
             SiteKind::Tree(t) => t.render(canvas, dynamic_rng),
             SiteKind::GiantTree(gt) => gt.render(canvas, dynamic_rng),
             SiteKind::Gnarling(g) => g.render(canvas, dynamic_rng),
             SiteKind::Bridge(b) => b.render(canvas, dynamic_rng),
             SiteKind::Adlet(ad) => ad.render(canvas, dynamic_rng),
+            SiteKind::Haniwa(ha) => ha.render(canvas, dynamic_rng),
+            SiteKind::Cultist(cl) => cl.render(canvas, dynamic_rng),
+            SiteKind::Sahagin(sg) => sg.render(canvas, dynamic_rng),
         }
     }
 
@@ -400,12 +452,16 @@ impl Site {
             SiteKind::Camp(_) => {},
             SiteKind::DesertCity(_) => {},
             SiteKind::ChapelSite(p) => p.apply_supplement(dynamic_rng, wpos2d, supplement),
+            SiteKind::Terracotta(tr) => tr.apply_supplement(dynamic_rng, wpos2d, supplement),
             SiteKind::DwarvenMine(dm) => dm.apply_supplement(dynamic_rng, wpos2d, supplement),
             SiteKind::Tree(_) => {},
             SiteKind::GiantTree(gt) => gt.apply_supplement(dynamic_rng, wpos2d, supplement),
             SiteKind::Gnarling(g) => g.apply_supplement(dynamic_rng, wpos2d, supplement),
             SiteKind::Bridge(b) => b.apply_supplement(dynamic_rng, wpos2d, supplement),
             SiteKind::Adlet(ad) => ad.apply_supplement(dynamic_rng, wpos2d, supplement),
+            SiteKind::Haniwa(ha) => ha.apply_supplement(dynamic_rng, wpos2d, supplement),
+            SiteKind::Cultist(cl) => cl.apply_supplement(dynamic_rng, wpos2d, supplement),
+            SiteKind::Sahagin(sg) => sg.apply_supplement(dynamic_rng, wpos2d, supplement),
         }
     }
 
@@ -441,10 +497,14 @@ impl Site {
             SiteKind::DesertCity(site2) => Some(site2),
             SiteKind::ChapelSite(site2) => Some(site2),
             SiteKind::DwarvenMine(site2) => Some(site2),
+            SiteKind::Terracotta(site2) => Some(site2),
             SiteKind::GiantTree(site2) => Some(site2),
             SiteKind::Gnarling(site2) => Some(site2),
             SiteKind::Bridge(site2) => Some(site2),
             SiteKind::Adlet(site2) => Some(site2),
+            SiteKind::Haniwa(site2) => Some(site2),
+            SiteKind::Cultist(site2) => Some(site2),
+            SiteKind::Sahagin(site2) => Some(site2),
         }
     }
 }
