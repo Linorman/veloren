@@ -6,8 +6,8 @@ ItemDef(
             toolkind: Staff,
             stats: (
                 equip_time_secs: 1.0,
-                power: 1.0,
-                effect_power: 1.0,
+                power: 2.0,
+                effect_power: 2.0,
                 speed: 1.0,
                 range: 1.0,
                 energy_efficiency: 1.0,
