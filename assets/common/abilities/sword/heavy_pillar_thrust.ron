@@ -7,14 +7,14 @@ DiveMelee(
     recover_duration: 0.3,
     melee_constructor: (
         kind: Slash(
-            damage: 32,
+            damage: 64,
             poise: 40,
             knockback: 0,
             energy_regen: 0,
         ),
         scaled: Some((
             kind: Slash(
-                damage: 16,
+                damage: 32,
                 poise: 11,
                 knockback: 0,
                 energy_regen: 0,

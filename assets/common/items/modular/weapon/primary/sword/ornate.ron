@@ -6,8 +6,8 @@ ItemDef(
             toolkind: Sword,
             stats: (
                 equip_time_secs: 0.25,
-                power: 1.8,
-                effect_power: 1.6,
+                power: 2.88,
+                effect_power: 2.56,
                 speed: 1.98,
                 range: 1.0,
                 energy_efficiency: 1.5,
