@@ -10,7 +10,7 @@ ChargedMelee(
         ),
         scaled: Some((
             kind: Slash(
-                damage: 20,
+                damage: 40,
                 poise: 30,
                 knockback: 0,
                 energy_regen: 30,

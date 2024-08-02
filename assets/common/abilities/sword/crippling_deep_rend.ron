@@ -21,7 +21,7 @@ ChargedMelee(
     ),
     buildup_strike: Some((0.3, (
         kind: Slash(
-            damage: 6,
+            damage: 12,
             poise: 0,
             knockback: 0,
             energy_regen: 5,
